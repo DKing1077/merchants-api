@@ -1,0 +1,41 @@
+Merchant Transactions Platform
+A FastAPI backend where merchants can:
+
+create payment intents
+confirm/capture payments
+issue refunds
+receive webhook notifications
+inspect transaction history
+view balances from ledger postings
+optionally flag suspicious transactions for review
+That feels:
+
+specific enough for Stripe
+general enough for Dropbox
+backend-heavy enough for both
+
+What should be core vs optional
+Core
+    FastAPI async API
+    PostgreSQL
+    payment intent lifecycle
+    refunds
+    idempotency keys
+    immutable ledger entries
+    webhook delivery with retries
+    structured logging
+    tests
+    Docker
+    Secondary but valuable
+    Redis caching / dedupe
+    background workers
+    reconciliation job
+    basic risk rules
+    admin replay of failed webhooks
+    metrics / tracing
+
+Optional
+    manual review queue
+    dispute simulation
+    payout scheduling
+    internal gRPC service

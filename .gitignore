@@ -1,0 +1,9 @@
+.idea/
+config.py
+.env
+
+# py cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
