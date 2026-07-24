@@ -5,6 +5,7 @@ from app.services.payment_service import (
     get_payment_intent,
     list_payment_intents,
     confirm_payment_intent,
+    cancel_payment_intent,
 )
 
 router = APIRouter()
@@ -31,7 +32,15 @@ def confirm_payment_intent_route(payment_intent_id: str):
     payment_intent = confirm_payment_intent(payment_intent_id)
 
     if not payment_intent:
-        raise HTTPException(status_code=404, detail="Payment intent not found")
+        raise HTTPException(status_code=404, detail="Payment intent could not be confirmed")
 
     return payment_intent
 
+@router.post("/{payment_intent_id}/cancel", response_model=PaymentIntentResponse)
+def cancel_payment_intent_route(payment_intent_id: str):
+    payment_intent = cancel_payment_intent(payment_intent_id)
+
+    if not payment_intent:
+        raise HTTPException(status_code=404, detail="Payment intent could not be canceled")
+
+    return payment_intent

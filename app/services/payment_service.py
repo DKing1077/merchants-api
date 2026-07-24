@@ -1,3 +1,5 @@
+from app.schemas.payment_intents import PaymentIntentStatus
+
 payment_intents = {}
 
 def create_payment_intent(amount: int, currency: str):
@@ -7,7 +9,7 @@ def create_payment_intent(amount: int, currency: str):
         "id": payment_intent_id,
         "amount": amount,
         "currency": currency,
-        "status": "requires_payment_method",
+        "status": PaymentIntentStatus.requires_payment_method,
     }
 
     payment_intents[payment_intent_id] = payment_intent
@@ -25,6 +27,21 @@ def confirm_payment_intent(payment_intent_id: str):
     if not payment_intent:
         return None
 
-    payment_intent["status"] = "succeeded"
+    if payment_intent["status"] == PaymentIntentStatus.canceled:
+        return None
+
+    payment_intent["status"] = PaymentIntentStatus.succeeded
+    return payment_intent
+
+def cancel_payment_intent(payment_intent_id: str):
+    payment_intent = payment_intents.get(payment_intent_id)
+
+    if not payment_intent:
+        return None
+
+    if payment_intent["status"] == PaymentIntentStatus.succeeded:
+        return None
+
+    payment_intent["status"] = PaymentIntentStatus.canceled
     return payment_intent
 

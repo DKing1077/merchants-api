@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from app.api.routes import payment_intents
+from app.routes import payment_intents
 
 app = FastAPI(title='Merchants Transactions Platform')
 
