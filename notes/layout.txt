@@ -1,0 +1,32 @@
+MAIN:
+    -bootstraps the API
+    -initializes DB table creation
+    -defines a root health route
+    -mounts the payment intent router
+
+CONFIG:
+    -sets up environment variables
+    -configures database connection
+    -defines server port and host
+
+SCHEMAS:
+    -Define request and response shapes
+    -Validate incoming data
+    -Normalize values like currency
+    -Control allowed values with enums
+    -Power FastAPI docs and typed responses
+
+ROUTES:
+    -Handle HTTP requests and responses
+    -Define endpoints like GET, POST
+    -Read path params / request bodies
+    -Call service functions
+    -Convert domain errors into HTTP errors like 404 and 409
+
+
+SERVICES:
+    -Hold business logic
+    -Create/read/update payment intents
+    -Enforce state transition rules
+    -Raise domain-specific exceptions
+    -Talk to the database instead of handling HTTP details

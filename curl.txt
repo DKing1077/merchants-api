@@ -1,0 +1,39 @@
+# Start app
+./dev.sh
+
+# Root check
+curl http://127.0.0.1:8000/
+
+# Create payment intent 1
+curl -X POST http://127.0.0.1:8000/v1/payment_intents/ \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 1000, "currency": "usd"}'
+
+# Create payment intent 2
+curl -X POST http://127.0.0.1:8000/v1/payment_intents/ \
+  -H "Content-Type: application/json" \
+  -d '{"amount": 2500, "currency": "eur"}'
+
+# List payment intents
+curl http://127.0.0.1:8000/v1/payment_intents/
+
+# Get one payment intent
+curl http://127.0.0.1:8000/v1/payment_intents/pi_1
+
+# Confirm payment intent
+curl -X POST http://127.0.0.1:8000/v1/payment_intents/pi_1/confirm
+
+# Cancel payment intent
+curl -X POST http://127.0.0.1:8000/v1/payment_intents/pi_2/cancel
+
+# Invalid transition example
+curl -X POST http://127.0.0.1:8000/v1/payment_intents/pi_1/cancel
+
+# Validation error example
+curl -X POST http://127.0.0.1:8000/v1/payment_intents/ \
+  -H "Content-Type: application/json" \
+  -d '{"amount": -5, "currency": "us"}'
+
+# Swagger docs
+# Open in browser:
+# http://127.0.0.1:8000/docs

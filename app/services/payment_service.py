@@ -1,28 +1,36 @@
+from sqlalchemy.orm import Session
+
 from app.core.exceptions import (
     InvalidPaymentIntentStateError,
     PaymentIntentNotFoundError,
 )
+from app.db.models.payment_intent import PaymentIntent
 from app.schemas.payment_intents import PaymentIntentStatus
 
-payment_intents = {}
 
+def create_payment_intent(db: Session, amount: int, currency: str):
+    payment_intent_count = db.query(PaymentIntent).count()
+    payment_intent_id = f"pi_{payment_intent_count + 1}"
 
-def create_payment_intent(amount: int, currency: str):
-    payment_intent_id = f"pi_{len(payment_intents) + 1}"
+    payment_intent = PaymentIntent(
+        id=payment_intent_id,
+        amount=amount,
+        currency=currency,
+        status=PaymentIntentStatus.requires_payment_method.value,
+    )
 
-    payment_intent = {
-        "id": payment_intent_id,
-        "amount": amount,
-        "currency": currency,
-        "status": PaymentIntentStatus.requires_payment_method,
-    }
-
-    payment_intents[payment_intent_id] = payment_intent
+    db.add(payment_intent)
+    db.commit()
+    db.refresh(payment_intent)
     return payment_intent
 
 
-def get_payment_intent(payment_intent_id: str):
-    payment_intent = payment_intents.get(payment_intent_id)
+def get_payment_intent(db: Session, payment_intent_id: str):
+    payment_intent = (
+        db.query(PaymentIntent)
+        .filter(PaymentIntent.id == payment_intent_id)
+        .first()
+    )
 
     if not payment_intent:
         raise PaymentIntentNotFoundError(f"Payment intent {payment_intent_id} not found")
@@ -30,30 +38,34 @@ def get_payment_intent(payment_intent_id: str):
     return payment_intent
 
 
-def list_payment_intents():
-    return list(payment_intents.values())
+def list_payment_intents(db: Session):
+    return db.query(PaymentIntent).all()
 
 
-def confirm_payment_intent(payment_intent_id: str):
-    payment_intent = get_payment_intent(payment_intent_id)
+def confirm_payment_intent(db: Session, payment_intent_id: str):
+    payment_intent = get_payment_intent(db, payment_intent_id)
 
-    if payment_intent["status"] == PaymentIntentStatus.canceled:
+    if payment_intent.status == PaymentIntentStatus.canceled.value:
         raise InvalidPaymentIntentStateError(
             f"Cannot confirm canceled payment intent {payment_intent_id}"
         )
 
-    payment_intent["status"] = PaymentIntentStatus.succeeded
+    payment_intent.status = PaymentIntentStatus.succeeded.value
+    db.commit()
+    db.refresh(payment_intent)
     return payment_intent
 
 
-def cancel_payment_intent(payment_intent_id: str):
-    payment_intent = get_payment_intent(payment_intent_id)
+def cancel_payment_intent(db: Session, payment_intent_id: str):
+    payment_intent = get_payment_intent(db, payment_intent_id)
 
-    if payment_intent["status"] == PaymentIntentStatus.succeeded:
+    if payment_intent.status == PaymentIntentStatus.succeeded.value:
         raise InvalidPaymentIntentStateError(
             f"Cannot cancel succeeded payment intent {payment_intent_id}"
         )
 
-    payment_intent["status"] = PaymentIntentStatus.canceled
+    payment_intent.status = PaymentIntentStatus.canceled.value
+    db.commit()
+    db.refresh(payment_intent)
     return payment_intent
 
