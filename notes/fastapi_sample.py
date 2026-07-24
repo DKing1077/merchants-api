@@ -10,24 +10,24 @@ class Item(BaseModel):
     price: float
     tax: float
 
-@app.get("/items/")
+@app.post("/items/")
 async def create_item(item: Item):
     return {"name": item.name, "price": item.price}
 
 # depend on get db function, reurn yield, close
-# def get_db():
-#     db = DBSession()
-#     try:
-#         yield db
-#     finally:
-#         db.close()
-#
-# @app.get("/items/")
-# async def read_items(db = Depends(get_db)):
-#     items = db.get_items()
-#     return items
+def get_db():
+    db = DBSession()
+    try:
+        yield db
+    finally:
+        db.close()
 
-# return routes
+@app.get("/items/")
+async def read_items(db = Depends(get_db)):
+    items = db.get_items()
+    return items
+
+# return api
 @app.get("/")
 async def read_root():
     return {"Hello": "World"}
@@ -53,7 +53,7 @@ async def read_items(q: str = None):
 async def update_item(item_id: int, item: Item):
     return {"item_id": item_id, "name": item.name, "price": item.price}
 
-@app.post("/items/", status_code=201)
+@app.delete("/items/", status_code=201)
 async def delete_item(item: Item):
     return item
 
