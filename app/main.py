@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api.routes import payment_intents
+from app.api.routes import payments
 from app.core.config import settings
 from app.db.database import Base, engine
 from app.db.models import PaymentIntent
@@ -16,7 +16,7 @@ def root():
 
 
 app.include_router(
-    payment_intents.router,
+    payments.router,
     prefix="/v1/payment_intents",
     tags=["payment_intents"],
 )

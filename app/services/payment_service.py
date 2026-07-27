@@ -1,14 +1,12 @@
-from sqlalchemy.orm import Session
-
 from app.core.exceptions import (
     InvalidPaymentIntentStateError,
     PaymentIntentNotFoundError,
 )
-from app.db.models.payment_intent import PaymentIntent
-from app.schemas.payment_intents import PaymentIntentStatus
+from app.db.models.models import PaymentIntent
+from app.schemas.payments_schemas import PaymentIntentStatus
 
 
-def create_payment_intent(db: Session, amount: int, currency: str):
+def create_payment_intent(db, amount, currency):
     payment_intent_count = db.query(PaymentIntent).count()
     payment_intent_id = f"pi_{payment_intent_count + 1}"
 
@@ -25,7 +23,7 @@ def create_payment_intent(db: Session, amount: int, currency: str):
     return payment_intent
 
 
-def get_payment_intent(db: Session, payment_intent_id: str):
+def get_payment_intent(db, payment_intent_id):
     payment_intent = (
         db.query(PaymentIntent)
         .filter(PaymentIntent.id == payment_intent_id)
@@ -38,11 +36,11 @@ def get_payment_intent(db: Session, payment_intent_id: str):
     return payment_intent
 
 
-def list_payment_intents(db: Session):
+def list_payment_intents(db):
     return db.query(PaymentIntent).all()
 
 
-def confirm_payment_intent(db: Session, payment_intent_id: str):
+def confirm_payment_intent(db, payment_intent_id):
     payment_intent = get_payment_intent(db, payment_intent_id)
 
     if payment_intent.status == PaymentIntentStatus.canceled.value:
@@ -56,7 +54,7 @@ def confirm_payment_intent(db: Session, payment_intent_id: str):
     return payment_intent
 
 
-def cancel_payment_intent(db: Session, payment_intent_id: str):
+def cancel_payment_intent(db, payment_intent_id):
     payment_intent = get_payment_intent(db, payment_intent_id)
 
     if payment_intent.status == PaymentIntentStatus.succeeded.value:
