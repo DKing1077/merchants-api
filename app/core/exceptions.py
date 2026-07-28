@@ -5,3 +5,11 @@ class PaymentIntentNotFoundError(Exception):
 class InvalidPaymentIntentStateError(Exception):
     pass
 
+
+class RefundIntentNotFoundError(Exception):
+    pass
+
+
+class RefundIntentStateError(Exception):
+    pass
+

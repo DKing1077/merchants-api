@@ -1,9 +1,6 @@
-from app.core.exceptions import (
-    InvalidPaymentIntentStateError,
-    PaymentIntentNotFoundError,
-)
-from app.db.models.models import PaymentIntent
+from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError
 from app.schemas.payments_schemas import PaymentIntentStatus
+from app.db.models.models import PaymentIntent
 
 
 def create_payment_intent(db, amount, currency):

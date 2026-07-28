@@ -3,10 +3,9 @@ from fastapi import FastAPI
 from app.api.routes import payments
 from app.core.config import settings
 from app.db.database import Base, engine
-from app.db.models import PaymentIntent
+from app.db.models import PaymentIntent, Refunds
 
 Base.metadata.create_all(bind=engine)
-
 app = FastAPI(title=settings.app_name)
 
 
