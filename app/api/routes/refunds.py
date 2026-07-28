@@ -1,6 +1,6 @@
 from app.services.refunds_service import confirm_refund, decline_refund, cancel_refund
 from app.services.refunds_service import list_refunds, create_refund, get_refund
-from app.core.exceptions import RefundIntentNotFoundError, RefundIntentStateError
+from app.core.exceptions import RefundNotFoundError, RefundStateError
 from fastapi import APIRouter, Depends, HTTPException
 from app.db.database import get_db
 
@@ -20,7 +20,7 @@ def create_refund_route(payment_intent_id, db = Depends(get_db)):
 def get_refund_route(payment_intent_id, db = Depends(get_db)):
     try:
         get_refund(payment_intent_id, db)
-    except RefundIntentNotFoundError:
+    except RefundNotFoundError:
         raise HTTPException(status_code=404, detail="Refund not found")
 
 
@@ -28,28 +28,28 @@ def get_refund_route(payment_intent_id, db = Depends(get_db)):
 def confirm_refund_route(payment_intent_id, db = Depends(get_db)):
     try:
         confirm_refund(payment_intent_id, db)
-    except RefundIntentNotFoundError:
-        raise HTTPException(status_code=404, detail="Refund not found")
-    except RefundIntentStateError:
-        raise HTTPException(status_code=404, detail="Refund not found")
+    except RefundNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RefundStateError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router("")
 def decline_refund_route(payment_intent_id, db = Depends(get_db)):
     try:
         decline_refund(payment_intent_id, db)
-    except RefundIntentNotFoundError:
-        raise HTTPException(status_code=404, detail="Refund not found")
-    except RefundIntentStateError:
-        raise HTTPException(status_code=404, detail="Refund not found")
+    except RefundNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RefundStateError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router("")
 def cancel_refund_route(payment_intent_id, db = Depends(get_db)):
     try:
         cancel_refund(payment_intent_id, db)
-    except RefundIntentNotFoundError:
-        raise HTTPException(status_code=404, detail="Refund not found")
-    except RefundIntentStateError:
-        raise HTTPException(status_code=404, detail="Refund not found")
+    except RefundIntentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RefundIntentStateError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
 

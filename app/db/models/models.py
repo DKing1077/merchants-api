@@ -15,7 +15,7 @@ class PaymentIntent(Base):
 class Refunds(Base):
     __tablename__ = "refunds"
 
-    id = Column(String, primary_key=True, index=True)
+    id = Column(String, primary_key=True, index=True, nullable=False)
     payment_intent_id = Column(String, ForeignKey("payment_intents.id"), nullable=False)
     status = Column(String, nullable=False)
 

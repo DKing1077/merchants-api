@@ -21,3 +21,4 @@ class PaymentIntentResponse(BaseModel):
     currency: str
     status: PaymentIntentStatus
 
+

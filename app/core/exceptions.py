@@ -6,10 +6,10 @@ class InvalidPaymentIntentStateError(Exception):
     pass
 
 
-class RefundIntentNotFoundError(Exception):
+class RefundNotFoundError(Exception):
     pass
 
 
-class RefundIntentStateError(Exception):
+class RefundStateError(Exception):
     pass
 
