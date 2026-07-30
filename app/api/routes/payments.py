@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from app.db.database import get_db
 from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError
-from app.schemas.payments_schemas import PaymentIntentCreate, PaymentIntentResponse
+from app.schemas.payments_schemas import PaymentIntentResponse
 from app.services.payment_service import cancel_payment_intent, confirm_payment_intent, create_payment_intent
 from app.services.payment_service import get_payment_intent, list_payment_intents
 

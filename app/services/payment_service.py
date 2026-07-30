@@ -15,9 +15,9 @@ def create_payment_intent(db, amount, currency):
     timestamp = Timestamp(
         id = payment_intent_id
     )
-    db.add(payment_intent, timestamp)
+    db.add(payment_intent)
+    db.add(timestamp)
     db.commit()
-    db.flush()
     db.refresh(payment_intent)
     return payment_intent
 
@@ -41,6 +41,25 @@ def confirm_payment_intent(db, payment_intent_id):
     payment_intent = get_payment_intent(db, payment_intent_id)
     if payment_intent.status == PaymentIntentStatus.canceled.value:
         raise InvalidPaymentIntentStateError(f"Cannot confirm canceled payment intent {payment_intent_id}")
+    if payment_intent.status == PaymentIntentStatus.succeeded.value:
+        raise InvalidPaymentIntentStateError(f"Cannot confirm succeeded payment intent {payment_intent_id}")
+    if payment_intent.status == PaymentIntentStatus.requires_capture.value:
+        raise InvalidPaymentIntentStateError(f"Payment intent {payment_intent_id} already requires capture")
+
+    payment_intent.status = PaymentIntentStatus.requires_capture.value
+    db.commit()
+    db.refresh(payment_intent)
+    return payment_intent
+
+
+def capture_payment_intent(db, payment_intent_id):
+    payment_intent = get_payment_intent(db, payment_intent_id)
+    if payment_intent.status == PaymentIntentStatus.canceled.value:
+        raise InvalidPaymentIntentStateError(f"Cannot capture canceled payment intent {payment_intent_id}")
+    if payment_intent.status == PaymentIntentStatus.succeeded.value:
+        raise InvalidPaymentIntentStateError(f"Payment intent {payment_intent_id} has already succeeded")
+    if payment_intent.status != PaymentIntentStatus.requires_capture.value:
+        raise InvalidPaymentIntentStateError(f"Payment intent {payment_intent_id} is not in a capturable state")
 
     payment_intent.status = PaymentIntentStatus.succeeded.value
     db.commit()
@@ -52,9 +71,10 @@ def cancel_payment_intent(db, payment_intent_id):
     payment_intent = get_payment_intent(db, payment_intent_id)
     if payment_intent.status == PaymentIntentStatus.succeeded.value:
         raise InvalidPaymentIntentStateError(f"Cannot cancel succeeded payment intent {payment_intent_id}")
+    if payment_intent.status == PaymentIntentStatus.canceled.value:
+        raise InvalidPaymentIntentStateError(f"Payment intent {payment_intent_id} is already canceled")
 
     payment_intent.status = PaymentIntentStatus.canceled.value
     db.commit()
     db.refresh(payment_intent)
     return payment_intent
-
