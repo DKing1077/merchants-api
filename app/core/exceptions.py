@@ -13,3 +13,7 @@ class RefundNotFoundError(Exception):
 class RefundStateError(Exception):
     pass
 
+
+class InvalidTimestamp(Exception):
+    pass
+

@@ -6,17 +6,17 @@ from app.db.database import get_db
 
 router = APIRouter()
 
-@router("/")
+@router.get("/")
 def list_refunds_route(db = Depends(get_db)):
     return list_refunds(db)
 
 
-@router("")
+@router.post("/{refund_id}/create")
 def create_refund_route(payment_intent_id, db = Depends(get_db)):
     return create_refund(db)
 
 
-@router("")
+@router.get("/{refund_id}/refunds")
 def get_refund_route(payment_intent_id, db = Depends(get_db)):
     try:
         get_refund(payment_intent_id, db)
@@ -24,7 +24,7 @@ def get_refund_route(payment_intent_id, db = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Refund not found")
 
 
-@router("")
+@router.post("/{refund_id}/confirm")
 def confirm_refund_route(payment_intent_id, db = Depends(get_db)):
     try:
         confirm_refund(payment_intent_id, db)
@@ -34,7 +34,7 @@ def confirm_refund_route(payment_intent_id, db = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@router("")
+@router.get("/{refund_id}/decline")
 def decline_refund_route(payment_intent_id, db = Depends(get_db)):
     try:
         decline_refund(payment_intent_id, db)
@@ -44,12 +44,12 @@ def decline_refund_route(payment_intent_id, db = Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@router("")
+@router.get("/{refund_id}/cancel")
 def cancel_refund_route(payment_intent_id, db = Depends(get_db)):
     try:
         cancel_refund(payment_intent_id, db)
-    except RefundIntentNotFoundError as exc:
+    except RefundNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    except RefundIntentStateError as exc:
+    except RefundStateError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 

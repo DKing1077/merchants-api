@@ -1,21 +1,23 @@
 from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError
 from app.schemas.payments_schemas import PaymentIntentStatus
-from app.db.models.models import PaymentIntent
+from app.db.models.models import PaymentIntent, Timestamp
 
 
 def create_payment_intent(db, amount, currency):
     payment_intent_count = db.query(PaymentIntent).count()
     payment_intent_id = f"pi_{payment_intent_count + 1}"
-
     payment_intent = PaymentIntent(
         id=payment_intent_id,
         amount=amount,
         currency=currency,
         status=PaymentIntentStatus.requires_payment_method.value,
     )
-
-    db.add(payment_intent)
+    timestamp = Timestamp(
+        id = payment_intent_id
+    )
+    db.add(payment_intent, timestamp)
     db.commit()
+    db.flush()
     db.refresh(payment_intent)
     return payment_intent
 
