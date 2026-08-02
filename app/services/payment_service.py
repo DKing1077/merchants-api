@@ -1,6 +1,7 @@
 from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError
 from app.schemas.payments_schemas import PaymentIntentStatus
 from app.db.models.models import PaymentIntent
+from app.services.events import create_event
 
 
 def create_payment_intent(db, amount, currency, idempotency_key=None):
@@ -12,8 +13,10 @@ def create_payment_intent(db, amount, currency, idempotency_key=None):
         )
         if existing:
             return existing
+
     payment_intent_count = db.query(PaymentIntent).count()
     payment_intent_id = f"pi_{payment_intent_count + 1}"
+
     payment_intent = PaymentIntent(
         id=payment_intent_id,
         amount=amount,
@@ -22,6 +25,20 @@ def create_payment_intent(db, amount, currency, idempotency_key=None):
         idempotency_key=idempotency_key,
     )
     db.add(payment_intent)
+    db.flush()
+
+    create_event(
+        db=db,
+        event_type="payment_intent.created",
+        object_id=payment_intent.id,
+        payload={
+            "id": payment_intent.id,
+            "amount": payment_intent.amount,
+            "currency": payment_intent.currency,
+            "status": payment_intent.status,
+        },
+    )
+
     db.commit()
     db.refresh(payment_intent)
     return payment_intent
@@ -52,7 +69,19 @@ def confirm_payment_intent(db, payment_intent_id):
         raise InvalidPaymentIntentStateError(f"Payment intent {payment_intent_id} already requires capture")
 
     payment_intent.status = PaymentIntentStatus.requires_capture.value
+
+    create_event(
+        db=db,
+        event_type="payment_intent.confirmed",
+        object_id=payment_intent.id,
+        payload={
+            "id": payment_intent.id,
+            "status": payment_intent.status,
+        },
+    )
+
     db.commit()
+    db.refresh(payment_intent)
     return payment_intent
 
 
@@ -66,7 +95,19 @@ def capture_payment_intent(db, payment_intent_id):
         raise InvalidPaymentIntentStateError(f"Payment intent {payment_intent_id} is not in a capturable state")
 
     payment_intent.status = PaymentIntentStatus.succeeded.value
+
+    create_event(
+        db=db,
+        event_type="payment_intent.captured",
+        object_id=payment_intent.id,
+        payload={
+            "id": payment_intent.id,
+            "status": payment_intent.status,
+        },
+    )
+
     db.commit()
+    db.refresh(payment_intent)
     return payment_intent
 
 
@@ -78,5 +119,17 @@ def cancel_payment_intent(db, payment_intent_id):
         raise InvalidPaymentIntentStateError(f"Payment intent {payment_intent_id} is already canceled")
 
     payment_intent.status = PaymentIntentStatus.canceled.value
+
+    create_event(
+        db=db,
+        event_type="payment_intent.canceled",
+        object_id=payment_intent.id,
+        payload={
+            "id": payment_intent.id,
+            "status": payment_intent.status,
+        },
+    )
+
     db.commit()
+    db.refresh(payment_intent)
     return payment_intent
