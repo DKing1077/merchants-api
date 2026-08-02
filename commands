@@ -1,0 +1,13 @@
+pip install alembic
+alembic init alembic
+
+update:
+    - config.set_main_option("sqlalchemy.url", settings.database_url)
+    - config.set_main_option("sqlalchemy.url", settings.database_url)
+
+uvicorn app.main:app --reload
+
+alembic revision --autogenerate -m "initial schema"
+alembic upgrade head
+
+

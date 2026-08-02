@@ -1,7 +1,7 @@
 from app.services.refunds_service import confirm_refund, decline_refund, cancel_refund
 from app.services.refunds_service import list_refunds, create_refund, get_refund
 from app.core.exceptions import RefundNotFoundError, RefundStateError
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header
 from app.db.database import get_db
 
 router = APIRouter()
@@ -11,9 +11,9 @@ def list_refunds_route(db = Depends(get_db)):
     return list_refunds(db)
 
 
-@router.post("/{refund_id}/create")
-def create_refund_route(payment_intent_id, db = Depends(get_db)):
-    return create_refund(db)
+@router.post("/{payment_intent_id}/refunds")
+def create_refund_route(payment_intent_id, db = Depends(get_db), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
+    return create_refund(db, payment_intent_id, idempotency_key)
 
 
 @router.get("/{refund_id}/refunds")

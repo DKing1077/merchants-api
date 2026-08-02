@@ -1,9 +1,17 @@
 from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError
 from app.schemas.payments_schemas import PaymentIntentStatus
-from app.db.models.models import PaymentIntent, Timestamp
+from app.db.models.models import PaymentIntent
 
 
-def create_payment_intent(db, amount, currency):
+def create_payment_intent(db, amount, currency, idempotency_key=None):
+    if idempotency_key:
+        existing = (
+            db.query(PaymentIntent)
+            .filter(PaymentIntent.idempotency_key == idempotency_key)
+            .first()
+        )
+        if existing:
+            return existing
     payment_intent_count = db.query(PaymentIntent).count()
     payment_intent_id = f"pi_{payment_intent_count + 1}"
     payment_intent = PaymentIntent(
@@ -11,12 +19,9 @@ def create_payment_intent(db, amount, currency):
         amount=amount,
         currency=currency,
         status=PaymentIntentStatus.requires_payment_method.value,
-    )
-    timestamp = Timestamp(
-        id = payment_intent_id
+        idempotency_key=idempotency_key,
     )
     db.add(payment_intent)
-    db.add(timestamp)
     db.commit()
     db.refresh(payment_intent)
     return payment_intent
@@ -48,7 +53,6 @@ def confirm_payment_intent(db, payment_intent_id):
 
     payment_intent.status = PaymentIntentStatus.requires_capture.value
     db.commit()
-    db.refresh(payment_intent)
     return payment_intent
 
 
@@ -63,7 +67,6 @@ def capture_payment_intent(db, payment_intent_id):
 
     payment_intent.status = PaymentIntentStatus.succeeded.value
     db.commit()
-    db.refresh(payment_intent)
     return payment_intent
 
 
@@ -76,5 +79,4 @@ def cancel_payment_intent(db, payment_intent_id):
 
     payment_intent.status = PaymentIntentStatus.canceled.value
     db.commit()
-    db.refresh(payment_intent)
     return payment_intent

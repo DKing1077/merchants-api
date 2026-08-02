@@ -1,5 +1,5 @@
 from enum import Enum
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel
 
 class PaymentIntentStatus(str, Enum):
     requires_payment_method = "requires_payment_method"
@@ -22,5 +22,9 @@ class PaymentIntentResponse(BaseModel):
     amount: int
     currency: str
     status: PaymentIntentStatus
+
+class CreatePaymentIntentRequest(BaseModel):
+    amount: int
+    currency: str
 
 

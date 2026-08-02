@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from app.db.database import get_db
-from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError
-from app.schemas.payments_schemas import PaymentIntentResponse
+from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError, IdempotencyConflictError
+from app.schemas.payments_schemas import CreatePaymentIntentRequest, PaymentIntentResponse
 from app.services.payment_service import cancel_payment_intent, confirm_payment_intent, create_payment_intent
 from app.services.payment_service import get_payment_intent, list_payment_intents
 
@@ -13,9 +13,20 @@ def list_payment_intents_route(db = Depends(get_db)):
     return {"payment_intents": list_payment_intents(db)}
 
 
-@router.post("/", response_model=PaymentIntentResponse)
-def create_payment_intent_route(payload, db = Depends(get_db),):
-    return create_payment_intent(db, payload.amount, payload.currency)
+@router.post("", response_model=PaymentIntentResponse, status_code=201)
+def create_payment_intent_route(
+    request: CreatePaymentIntentRequest,
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+    db = Depends(get_db)):
+    try:
+        return create_payment_intent(
+            db=db,
+            amount=request.amount,
+            currency=request.currency,
+            idempotency_key=idempotency_key,
+        )
+    except IdempotencyConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.get("/{payment_intent_id}", response_model=PaymentIntentResponse)

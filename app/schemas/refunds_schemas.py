@@ -3,6 +3,7 @@ from enum import Enum
 
 class RefundStatus(str, Enum):
     pending = "pending"
-    cofirmed = "cofirmed"
+    confirmed = "confirmed"
     declined = "declined"
     canceled = "canceled"
+

@@ -17,3 +17,7 @@ class RefundStateError(Exception):
 class InvalidTimestamp(Exception):
     pass
 
+
+class IdempotencyConflictError(Exception):
+    pass
+

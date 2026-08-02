@@ -1,4 +1,4 @@
-from app.db.models.models import Refunds, PaymentIntent, Timestamp
+from app.db.models.models import Refunds, PaymentIntent
 from app.core.exceptions import RefundStateError, RefundNotFoundError
 from app.schemas.refunds_schemas import RefundStatus
 
@@ -7,7 +7,15 @@ def list_refunds(db):
     return db.query(Refunds).all()
 
 
-def create_refund(payment_intent_id, refund_amount, db):
+def create_refund(payment_intent_id, refund_amount, db, idempotency_key=None):
+    if idempotency_key:
+        existing = (
+            db.query(Refunds)
+            .filter(Refunds.idempotency_key == idempotency_key)
+            .first()
+        )
+        if existing:
+            return existing
     payment_amount = db.query(PaymentIntent).filter(PaymentIntent.id == payment_intent_id).first().amount
     if refund_amount <= 0:
         raise RefundStateError(f"Refund amount has to be greater than 0")
@@ -17,14 +25,9 @@ def create_refund(payment_intent_id, refund_amount, db):
         payment_intent_id=payment_intent_id,
         amount=refund_amount,
         status=RefundStatus.pending,
+        idempotency_key=idempotency_key
     )
     db.add(refund)
-    db.flush()
-    refund_id = refund.id
-    timestamp = Timestamp(
-        refund_id=refund_id,
-    )
-    db.add(timestamp)
     db.flush()
     db.commit()
     db.refresh(refund)
@@ -46,7 +49,6 @@ def confirm_refund(payment_intent_id, db):
 
     refund.status = RefundStatus.confirmed
     db.commit()
-    db.refresh(refund)
     return refund
 
 
@@ -58,7 +60,6 @@ def decline_refund(payment_intent_id, db):
 
     refund.status = RefundStatus.declined
     db.commit()
-    db.refresh(refund)
     return refund
 
 
@@ -70,7 +71,6 @@ def cancel_refund(payment_intent_id, db):
 
     refund.status = RefundStatus.canceled
     db.commit()
-    db.refresh(refund)
     return refund
 
 
