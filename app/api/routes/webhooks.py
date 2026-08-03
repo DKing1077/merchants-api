@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.schemas.webhook_schemas import WebhookEndpointCreate, WebhookEndpointResponse
-from app.db.models import WebhookDispatch, WebhookEndpoint
+from app.db.models import WebhookDelivery, WebhookDispatch, WebhookEndpoint
+from app.services.delivery import process_pending_dispatches
 import uuid
 import secrets
 
@@ -33,3 +34,14 @@ def list_webhook_endpoints(db: Session = Depends(get_db)):
 @router.get("/dispatches")
 def list_webhook_dispatches(db: Session = Depends(get_db)):
     return db.query(WebhookDispatch).all()
+
+
+@router.get("/deliveries")
+def list_webhook_deliveries(db: Session = Depends(get_db)):
+    return db.query(WebhookDelivery).all()
+
+
+@router.post("/dispatches/process")
+def process_dispatches(db: Session = Depends(get_db)):
+    process_pending_dispatches(db)
+    return {"message": "dispatches processed"}

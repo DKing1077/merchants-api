@@ -8,9 +8,7 @@ def create_dispatches_for_event(db, merchant_id: str, event):
         .filter(WebhookEndpoint.is_active.is_(True))
         .all()
     )
-
     dispatches = []
-
     for endpoint in endpoints:
         if event.type in endpoint.event_types:
             dispatch = WebhookDispatch(
@@ -21,10 +19,10 @@ def create_dispatches_for_event(db, merchant_id: str, event):
             )
             db.add(dispatch)
             dispatches.append(dispatch)
-
     db.flush()
     return dispatches
 
 
 def list_dispatches(db):
     return db.query(WebhookDispatch).all()
+
