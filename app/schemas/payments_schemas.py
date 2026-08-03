@@ -1,6 +1,7 @@
 from enum import Enum
 from pydantic import BaseModel
 
+
 class PaymentIntentStatus(str, Enum):
     requires_payment_method = "requires_payment_method"
     requires_confirmation = "requires_confirmation"
@@ -8,23 +9,16 @@ class PaymentIntentStatus(str, Enum):
     succeeded = "succeeded"
     canceled = "canceled"
 
-# class PaymentIntentCreate(BaseModel):
-#     amount: int = Field(..., gt=0, description="Amount in smallest currency unit")
-#     currency: str = Field(..., min_length=3, max_length=3, description="ISO currency code")
-#
-#     @field_validator("currency")
-#     @classmethod
-#     def normalize_currency(cls, value: str) -> str:
-#         return value.strip().lower()
 
 class PaymentIntentResponse(BaseModel):
     id: str
+    merchant_id: str
     amount: int
     currency: str
     status: PaymentIntentStatus
 
+
 class CreatePaymentIntentRequest(BaseModel):
+    merchant_id: str
     amount: int
     currency: str
-
-

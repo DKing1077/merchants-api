@@ -2,9 +2,10 @@ from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNot
 from app.schemas.payments_schemas import PaymentIntentStatus
 from app.db.models.models import PaymentIntent
 from app.services.events import create_event
+from app.services.dispatch import create_dispatches_for_event
 
 
-def create_payment_intent(db, amount, currency, idempotency_key=None):
+def create_payment_intent(db, amount, currency, merchant_id, idempotency_key=None):
     if idempotency_key:
         existing = (
             db.query(PaymentIntent)
@@ -19,6 +20,7 @@ def create_payment_intent(db, amount, currency, idempotency_key=None):
 
     payment_intent = PaymentIntent(
         id=payment_intent_id,
+        merchant_id=merchant_id,
         amount=amount,
         currency=currency,
         status=PaymentIntentStatus.requires_payment_method.value,
@@ -27,17 +29,19 @@ def create_payment_intent(db, amount, currency, idempotency_key=None):
     db.add(payment_intent)
     db.flush()
 
-    create_event(
+    event = create_event(
         db=db,
         event_type="payment_intent.created",
         object_id=payment_intent.id,
         payload={
             "id": payment_intent.id,
+            "merchant_id": payment_intent.merchant_id,
             "amount": payment_intent.amount,
             "currency": payment_intent.currency,
             "status": payment_intent.status,
         },
     )
+    create_dispatches_for_event(db, payment_intent.merchant_id, event)
 
     db.commit()
     db.refresh(payment_intent)
@@ -70,15 +74,17 @@ def confirm_payment_intent(db, payment_intent_id):
 
     payment_intent.status = PaymentIntentStatus.requires_capture.value
 
-    create_event(
+    event = create_event(
         db=db,
         event_type="payment_intent.confirmed",
         object_id=payment_intent.id,
         payload={
             "id": payment_intent.id,
+            "merchant_id": payment_intent.merchant_id,
             "status": payment_intent.status,
         },
     )
+    create_dispatches_for_event(db, payment_intent.merchant_id, event)
 
     db.commit()
     db.refresh(payment_intent)
@@ -96,15 +102,17 @@ def capture_payment_intent(db, payment_intent_id):
 
     payment_intent.status = PaymentIntentStatus.succeeded.value
 
-    create_event(
+    event = create_event(
         db=db,
-        event_type="payment_intent.captured",
+        event_type="payment_intent.succeeded",
         object_id=payment_intent.id,
         payload={
             "id": payment_intent.id,
+            "merchant_id": payment_intent.merchant_id,
             "status": payment_intent.status,
         },
     )
+    create_dispatches_for_event(db, payment_intent.merchant_id, event)
 
     db.commit()
     db.refresh(payment_intent)
@@ -120,16 +128,19 @@ def cancel_payment_intent(db, payment_intent_id):
 
     payment_intent.status = PaymentIntentStatus.canceled.value
 
-    create_event(
+    event = create_event(
         db=db,
         event_type="payment_intent.canceled",
         object_id=payment_intent.id,
         payload={
             "id": payment_intent.id,
+            "merchant_id": payment_intent.merchant_id,
             "status": payment_intent.status,
         },
     )
+    create_dispatches_for_event(db, payment_intent.merchant_id, event)
 
     db.commit()
     db.refresh(payment_intent)
     return payment_intent
+

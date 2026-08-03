@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.schemas.webhook_schemas import WebhookEndpointCreate, WebhookEndpointResponse
-from app.db.models import WebhookEndpoint
+from app.db.models import WebhookDispatch, WebhookEndpoint
 import uuid
 import secrets
 
@@ -30,3 +30,6 @@ def list_webhook_endpoints(db: Session = Depends(get_db)):
     return db.query(WebhookEndpoint).all()
 
 
+@router.get("/dispatches")
+def list_webhook_dispatches(db: Session = Depends(get_db)):
+    return db.query(WebhookDispatch).all()

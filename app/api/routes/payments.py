@@ -2,14 +2,20 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from app.db.database import get_db
 from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError, IdempotencyConflictError
 from app.schemas.payments_schemas import CreatePaymentIntentRequest, PaymentIntentResponse
-from app.services.payment_service import cancel_payment_intent, confirm_payment_intent, create_payment_intent
-from app.services.payment_service import get_payment_intent, list_payment_intents
+from app.services.payment_service import (
+    cancel_payment_intent,
+    capture_payment_intent,
+    confirm_payment_intent,
+    create_payment_intent,
+    get_payment_intent,
+    list_payment_intents,
+)
 
 router = APIRouter()
 
 
 @router.get("/")
-def list_payment_intents_route(db = Depends(get_db)):
+def list_payment_intents_route(db=Depends(get_db)):
     return {"payment_intents": list_payment_intents(db)}
 
 
@@ -17,12 +23,14 @@ def list_payment_intents_route(db = Depends(get_db)):
 def create_payment_intent_route(
     request: CreatePaymentIntentRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    db = Depends(get_db)):
+    db=Depends(get_db),
+):
     try:
         return create_payment_intent(
             db=db,
             amount=request.amount,
             currency=request.currency,
+            merchant_id=request.merchant_id,
             idempotency_key=idempotency_key,
         )
     except IdempotencyConflictError as exc:
@@ -30,7 +38,7 @@ def create_payment_intent_route(
 
 
 @router.get("/{payment_intent_id}", response_model=PaymentIntentResponse)
-def get_payment_intent_route(payment_intent_id, db = Depends(get_db),):
+def get_payment_intent_route(payment_intent_id, db=Depends(get_db)):
     try:
         return get_payment_intent(db, payment_intent_id)
     except PaymentIntentNotFoundError as exc:
@@ -38,7 +46,7 @@ def get_payment_intent_route(payment_intent_id, db = Depends(get_db),):
 
 
 @router.post("/{payment_intent_id}/confirm", response_model=PaymentIntentResponse)
-def confirm_payment_intent_route(payment_intent_id, db = Depends(get_db),):
+def confirm_payment_intent_route(payment_intent_id, db=Depends(get_db)):
     try:
         return confirm_payment_intent(db, payment_intent_id)
     except PaymentIntentNotFoundError as exc:
@@ -47,8 +55,18 @@ def confirm_payment_intent_route(payment_intent_id, db = Depends(get_db),):
         raise HTTPException(status_code=409, detail=str(exc))
 
 
+@router.post("/{payment_intent_id}/capture", response_model=PaymentIntentResponse)
+def capture_payment_intent_route(payment_intent_id, db=Depends(get_db)):
+    try:
+        return capture_payment_intent(db, payment_intent_id)
+    except PaymentIntentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except InvalidPaymentIntentStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
 @router.post("/{payment_intent_id}/cancel", response_model=PaymentIntentResponse)
-def cancel_payment_intent_route(payment_intent_id, db = Depends(get_db),):
+def cancel_payment_intent_route(payment_intent_id, db=Depends(get_db)):
     try:
         return cancel_payment_intent(db, payment_intent_id)
     except PaymentIntentNotFoundError as exc:

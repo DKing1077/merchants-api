@@ -10,6 +10,7 @@ class PaymentIntent(Base):
     __tablename__ = "payment_intents"
 
     id = Column(String, primary_key=True, index=True)
+    merchant_id = Column(String, nullable=False, index=True)
     amount = Column(Integer, nullable=False)
     currency = Column(String(3), nullable=False)
     status = Column(String, nullable=False)
@@ -23,6 +24,7 @@ class Refunds(Base):
     __tablename__ = "refunds"
 
     id = Column(String, primary_key=True, index=True, nullable=False, unique=True)
+    merchant_id = Column(String, nullable=False, index=True)
     payment_intent_id = Column(String, ForeignKey("payment_intents.id"), nullable=False)
     amount = Column(Integer, nullable=False)
     status = Column(String, nullable=False)
@@ -63,7 +65,7 @@ class WebhookDispatch(Base):
     event_id = Column(String, ForeignKey("events.id"), nullable=False, index=True)
     webhook_endpoint_id = Column(String, ForeignKey("webhook_endpoints.id"), nullable=False, index=True)
     payload = Column(JSONB, nullable=False)
-    status = Column(String, default="pending", nullable=False)  # pending, success, failed
+    status = Column(String, default="pending", nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
@@ -77,15 +79,8 @@ class WebhookDelivery(Base):
     response_status = Column(Integer, nullable=True)
     response_body = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
-    status = Column(String, default="pending", nullable=False)  # pending, success, failed
+    status = Column(String, default="pending", nullable=False)
     next_retry_at = Column(DateTime, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-
-
-
-
-
-
-
