@@ -1,11 +1,12 @@
 from fastapi import FastAPI
-
 from app.api.routes import payments
+import app.api.routes.webhooks as webhooks
+import app.db.models.models
 from app.core.config import settings
-from app.db.database import create_database_if_missing
+from app.db.database import create_database_if_missing, Base, engine
 
 create_database_if_missing()
-
+Base.metadata.create_all(bind=engine)
 app = FastAPI(title=settings.app_name)
 
 
@@ -18,4 +19,10 @@ app.include_router(
     payments.router,
     prefix="/v1/payment_intents",
     tags=["payment_intents"],
+)
+
+app.include_router(
+    webhooks.router,
+    prefix="/v1/webhooks",
+    tags=["webhooks"],
 )

@@ -1,6 +1,5 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import declarative_base, sessionmaker
-
 from app.core.config import settings
 
 engine = create_engine(settings.database_url)
@@ -16,7 +15,7 @@ def get_db():
         db.close()
 
 
-def create_database_if_missing() -> None:
+def create_database_if_missing():
     database_url = settings.database_url
 
     target_db = database_url.rsplit("/", 1)[-1]
@@ -32,3 +31,4 @@ def create_database_if_missing() -> None:
 
         if not exists:
             conn.execute(text(f'CREATE DATABASE "{target_db}"'))
+
