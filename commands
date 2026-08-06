@@ -47,22 +47,24 @@ psql -U postgres -d merchants -c "DROP SCHEMA public CASCADE; CREATE SCHEMA publ
 # =========================================================
 
 # Create payment intent 1
-curl -X POST "http://127.0.0.1:8000/v1/payment_intents/" \
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents" \
   -H "Content-Type: application/json" \
   -d '{
+    "merchant_id": "m_123",
     "amount": 1000,
     "currency": "usd"
   }'
 
 # Create payment intent 2
-curl -X POST "http://127.0.0.1:8000/v1/payment_intents/" \
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents" \
   -H "Content-Type: application/json" \
   -d '{
+    "merchant_id": "m_123",
     "amount": 2500,
     "currency": "eur"
   }'
 
-# Create payment intent with merchant_id
+# Create payment intent 3
 curl -X POST "http://127.0.0.1:8000/v1/payment_intents" \
   -H "Content-Type: application/json" \
   -d '{
@@ -80,6 +82,9 @@ curl "http://127.0.0.1:8000/v1/payment_intents/pi_1"
 # Confirm payment intent
 curl -X POST "http://127.0.0.1:8000/v1/payment_intents/pi_1/confirm"
 
+# Capture payment intent
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/pi_1/capture"
+
 # Cancel payment intent
 curl -X POST "http://127.0.0.1:8000/v1/payment_intents/pi_2/cancel"
 
@@ -87,12 +92,45 @@ curl -X POST "http://127.0.0.1:8000/v1/payment_intents/pi_2/cancel"
 curl -X POST "http://127.0.0.1:8000/v1/payment_intents/pi_1/cancel"
 
 # Validation error example
-curl -X POST "http://127.0.0.1:8000/v1/payment_intents/" \
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents" \
   -H "Content-Type: application/json" \
   -d '{
+    "merchant_id": "m_123",
     "amount": -5,
     "currency": "us"
   }'
+
+# =========================================================
+# Suspicious / Review Flow tests
+# =========================================================
+
+# Flag a payment intent for review
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/pi_1/flag" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "amount looks suspicious"
+  }'
+
+# List flagged payment intents
+curl "http://127.0.0.1:8000/v1/payment_intents/admin/flagged"
+
+# Approve a flagged payment intent
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/admin/pi_1/review" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "review_status": "approved"
+  }'
+
+# Reject a flagged payment intent
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/admin/pi_1/review" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "review_status": "rejected"
+  }'
+
+# Try to confirm a rejected payment intent
+# Expected: HTTP 409 conflict
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/pi_1/confirm"
 
 # =========================================================
 # Webhook API tests
@@ -104,7 +142,12 @@ curl -X POST "http://127.0.0.1:8000/v1/webhooks/endpoints" \
   -d '{
     "merchant_id": "m_123",
     "url": "https://webhook.site/12345678-abcd-1234-abcd-1234567890ab",
-    "event_types": ["payment_intent.created"]
+    "event_types": [
+      "payment_intent.created",
+      "payment_intent.confirmed",
+      "payment_intent.succeeded",
+      "payment_intent.canceled"
+    ]
   }'
 
 # Create a payment intent to generate an event
@@ -196,15 +239,6 @@ curl -X POST "http://127.0.0.1:8000/v1/ledger/entries" \
 # Optional DB inspection queries
 # =========================================================
 
-# View ledger accounts
-psql -U postgres -d merchants -c "SELECT * FROM ledger_accounts;"
-
-# View ledger entries
-psql -U postgres -d merchants -c "SELECT * FROM ledger_entries;"
-
-# View ledger postings
-psql -U postgres -d merchants -c "SELECT * FROM ledger_postings;"
-
 # View payment intents
 psql -U postgres -d merchants -c "SELECT * FROM payment_intents;"
 
@@ -219,3 +253,13 @@ psql -U postgres -d merchants -c "SELECT * FROM webhook_dispatches;"
 
 # View webhook deliveries
 psql -U postgres -d merchants -c "SELECT * FROM webhook_deliveries;"
+
+# View ledger accounts
+psql -U postgres -d merchants -c "SELECT * FROM ledger_accounts;"
+
+# View ledger entries
+psql -U postgres -d merchants -c "SELECT * FROM ledger_entries;"
+
+# View ledger postings
+psql -U postgres -d merchants -c "SELECT * FROM ledger_postings;"
+

@@ -25,6 +25,9 @@ def create_payment_intent(db, amount, currency, merchant_id, idempotency_key=Non
         currency=currency,
         status=PaymentIntentStatus.requires_payment_method.value,
         idempotency_key=idempotency_key,
+        is_flagged=False,
+        review_status=None,
+        review_reason=None,
     )
     db.add(payment_intent)
     db.flush()
@@ -63,6 +66,41 @@ def list_payment_intents(db):
     return db.query(PaymentIntent).all()
 
 
+def list_flagged_payment_intents(db):
+    return (
+        db.query(PaymentIntent)
+        .filter(PaymentIntent.is_flagged == True)
+        .all()
+    )
+
+
+def flag_payment_intent(db, payment_intent_id, reason):
+    payment_intent = get_payment_intent(db, payment_intent_id)
+
+    payment_intent.is_flagged = True
+    payment_intent.review_status = "pending_review"
+    payment_intent.review_reason = reason
+
+    db.commit()
+    db.refresh(payment_intent)
+    return payment_intent
+
+
+def review_payment_intent(db, payment_intent_id, review_status):
+    payment_intent = get_payment_intent(db, payment_intent_id)
+
+    if not payment_intent.is_flagged:
+        raise InvalidPaymentIntentStateError(
+            f"Payment intent {payment_intent_id} is not flagged for review"
+        )
+
+    payment_intent.review_status = review_status
+
+    db.commit()
+    db.refresh(payment_intent)
+    return payment_intent
+
+
 def confirm_payment_intent(db, payment_intent_id):
     payment_intent = get_payment_intent(db, payment_intent_id)
     if payment_intent.status == PaymentIntentStatus.canceled.value:
@@ -71,6 +109,8 @@ def confirm_payment_intent(db, payment_intent_id):
         raise InvalidPaymentIntentStateError(f"Cannot confirm succeeded payment intent {payment_intent_id}")
     if payment_intent.status == PaymentIntentStatus.requires_capture.value:
         raise InvalidPaymentIntentStateError(f"Payment intent {payment_intent_id} already requires capture")
+    if payment_intent.review_status == "rejected":
+        raise InvalidPaymentIntentStateError(f"Cannot confirm rejected payment intent {payment_intent_id}")
 
     payment_intent.status = PaymentIntentStatus.requires_capture.value
 
@@ -99,6 +139,8 @@ def capture_payment_intent(db, payment_intent_id):
         raise InvalidPaymentIntentStateError(f"Payment intent {payment_intent_id} has already succeeded")
     if payment_intent.status != PaymentIntentStatus.requires_capture.value:
         raise InvalidPaymentIntentStateError(f"Payment intent {payment_intent_id} is not in a capturable state")
+    if payment_intent.review_status == "rejected":
+        raise InvalidPaymentIntentStateError(f"Cannot capture rejected payment intent {payment_intent_id}")
 
     payment_intent.status = PaymentIntentStatus.succeeded.value
 
@@ -143,4 +185,3 @@ def cancel_payment_intent(db, payment_intent_id):
     db.commit()
     db.refresh(payment_intent)
     return payment_intent
-

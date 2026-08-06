@@ -7,10 +7,8 @@ def create_ledger_entry(db, *, entry_type, reference_id=None,
                         description=None, entry_metadata=None, postings):
     if len(postings) < 2:
         raise ValueError("at least two postings are required")
-
     if sum(posting["amount"] for posting in postings) != 0:
         raise ValueError("postings must balance to zero")
-
     entry = LedgerEntry(
         entry_type=entry_type,
         reference_id=reference_id,
@@ -29,7 +27,6 @@ def create_ledger_entry(db, *, entry_type, reference_id=None,
                 currency=posting["currency"],
             )
         )
-
     db.commit()
     db.refresh(entry)
     return entry

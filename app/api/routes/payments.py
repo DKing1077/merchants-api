@@ -1,7 +1,12 @@
 from fastapi import APIRouter, Depends, Header, HTTPException
 from app.db.database import get_db
 from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError, IdempotencyConflictError
-from app.schemas.payments_schemas import CreatePaymentIntentRequest, PaymentIntentResponse
+from app.schemas.payments_schemas import (
+    CreatePaymentIntentRequest,
+    PaymentIntentResponse,
+    FlagPaymentIntentRequest,
+    ReviewPaymentIntentRequest,
+)
 from app.services.payment_service import (
     cancel_payment_intent,
     capture_payment_intent,
@@ -9,6 +14,9 @@ from app.services.payment_service import (
     create_payment_intent,
     get_payment_intent,
     list_payment_intents,
+    flag_payment_intent,
+    review_payment_intent,
+    list_flagged_payment_intents,
 )
 
 router = APIRouter()
@@ -43,6 +51,31 @@ def get_payment_intent_route(payment_intent_id, db=Depends(get_db)):
         return get_payment_intent(db, payment_intent_id)
     except PaymentIntentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
+
+
+@router.post("/{payment_intent_id}/flag", response_model=PaymentIntentResponse)
+def flag_payment_intent_route(payment_intent_id, request: FlagPaymentIntentRequest, db=Depends(get_db)):
+    try:
+        return flag_payment_intent(db, payment_intent_id, request.reason)
+    except PaymentIntentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except InvalidPaymentIntentStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+@router.get("/admin/flagged")
+def list_flagged_payment_intents_route(db=Depends(get_db)):
+    return {"payment_intents": list_flagged_payment_intents(db)}
+
+
+@router.post("/admin/{payment_intent_id}/review", response_model=PaymentIntentResponse)
+def review_payment_intent_route(payment_intent_id, request: ReviewPaymentIntentRequest, db=Depends(get_db)):
+    try:
+        return review_payment_intent(db, payment_intent_id, request.review_status.value)
+    except PaymentIntentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except InvalidPaymentIntentStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.post("/{payment_intent_id}/confirm", response_model=PaymentIntentResponse)

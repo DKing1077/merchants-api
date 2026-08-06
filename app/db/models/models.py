@@ -17,6 +17,10 @@ class PaymentIntent(Base):
     status = Column(String, nullable=False)
     idempotency_key = Column(String, unique=True, nullable=True)
 
+    is_flagged = Column(Boolean, default=False, nullable=False)
+    review_status = Column(String, nullable=True)
+    review_reason = Column(Text, nullable=True)
+
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
