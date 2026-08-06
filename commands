@@ -1,13 +1,47 @@
+# albemic
 pip install alembic
 alembic init alembic
+
+alembic revision --autogenerate -m "initial schema"
+alembic upgrade head
 
 update:
     - config.set_main_option("sqlalchemy.url", settings.database_url)
     - config.set_main_option("sqlalchemy.url", settings.database_url)
 
+#start app
 uvicorn app.main:app --reload
 
-alembic revision --autogenerate -m "initial schema"
-alembic upgrade head
+# reset database
+psql -U postgres -d merchants -c "TRUNCATE TABLE payment_intents, events, webhook_endpoints, webhook_dispatches, webhook_deliveries RESTART IDENTITY CASCADE;"
+
+# test webhook flow
+
+## register webhook endpoint
+curl -X POST "http://127.0.0.1:8000/v1/webhooks/endpoints" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "m_123",
+    "url": "https://webhook.site/12345678-abcd-1234-abcd-1234567890ab",
+    "event_types": ["payment_intent.created"]
+  }'
+
+## create payment intent
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "m_123",
+    "amount": 5000,
+    "currency": "usd"
+  }'
+
+## process dispatches
+curl -X POST "http://127.0.0.1:8000/v1/webhooks/dispatches/process"
+
+## inspect deliveries
+curl "http://127.0.0.1:8000/v1/webhooks/deliveries"
+
+
+
 
 

@@ -6,6 +6,7 @@ from app.db.database import Base
 import uuid
 
 
+# Stores a merchant payment request and its lifecycle state.
 class PaymentIntent(Base):
     __tablename__ = "payment_intents"
 
@@ -20,6 +21,7 @@ class PaymentIntent(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+# Stores refund records linked to a payment intent.
 class Refunds(Base):
     __tablename__ = "refunds"
 
@@ -34,6 +36,7 @@ class Refunds(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
 
 
+# Stores internal domain events for later processing or webhook fan-out.
 class Event(Base):
     __tablename__ = "events"
 
@@ -44,6 +47,7 @@ class Event(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+# Stores merchant webhook endpoint configuration.
 class WebhookEndpoint(Base):
     __tablename__ = "webhook_endpoints"
 
@@ -58,6 +62,7 @@ class WebhookEndpoint(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+# Stores a queued webhook dispatch for a specific event and endpoint.
 class WebhookDispatch(Base):
     __tablename__ = "webhook_dispatches"
 
@@ -70,6 +75,7 @@ class WebhookDispatch(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+# Stores each webhook delivery attempt and its result.
 class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
 
@@ -82,5 +88,43 @@ class WebhookDelivery(Base):
     status = Column(String, default="pending", nullable=False)
     next_retry_at = Column(DateTime, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# Represents a ledger account whose balance is derived from postings.
+class LedgerAccount(Base):
+    __tablename__ = "ledger_accounts"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    merchant_id = Column(String, nullable=False, index=True)
+    account_type = Column(String, nullable=False)
+    currency = Column(String(3), nullable=False)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# Represents one immutable ledger transaction entry.
+class LedgerEntry(Base):
+    __tablename__ = "ledger_entries"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    entry_type = Column(String, nullable=False)
+    reference_id = Column(String, nullable=True, index=True)
+    description = Column(Text, nullable=True)
+    metadata = Column(JSONB, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# Represents one movement line in a ledger entry; balances come from summing these.
+class LedgerPosting(Base):
+    __tablename__ = "ledger_postings"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    entry_id = Column(String, ForeignKey("ledger_entries.id"), nullable=False, index=True)
+    account_id = Column(String, ForeignKey("ledger_accounts.id"), nullable=False, index=True)
+    amount = Column(Integer, nullable=False)
+    currency = Column(String(3), nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)

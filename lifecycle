@@ -1,0 +1,10 @@
+1. merchant creates payment intent
+2. your API stores payment intent
+3. merchant confirms payment
+4. your API marks payment succeeded
+5. your API creates internal event
+6. your system creates webhook delivery job
+7. worker sends webhook to merchant URL
+8. merchant updates their order system
+9. your system marks delivered or retries
+

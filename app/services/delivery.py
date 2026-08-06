@@ -1,6 +1,6 @@
+from app.db.models import WebhookDispatch, WebhookEndpoint, WebhookDelivery
 from datetime import datetime, timedelta
 import httpx
-from app.db.models import WebhookDispatch, WebhookEndpoint, WebhookDelivery
 
 
 def process_pending_dispatches(db):

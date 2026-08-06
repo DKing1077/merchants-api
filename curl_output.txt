@@ -1,0 +1,18 @@
+Last login: Tue Aug  4 16:53:01 on ttys002
+davidking@Davids-MacBook-Pro ~ % curl -X POST "http://127.0.0.1:8000/v1/webhooks/endpoints" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "m_123",
+    "url": "https://webhook.site/12345678-abcd-1234-abcd-1234567890ab",
+    "event_types": ["payment_intent.created"]
+  }'
+{"id":"4b574ac2-10e1-468f-8ae5-322698a3bd45","merchant_id":"m_123","url":"https://webhook.site/12345678-abcd-1234-abcd-1234567890ab","event_types":["payment_intent.created"],"is_active":true,"created_at":"2026-08-04T16:15:39.668568"}%  davidking@Davids-MacBook-Pro ~ % curl -X POST "http://127.0.0.1:8000/v1/payment_intents" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "m_123",
+    "amount": 5000,
+    "currency": "usd"
+  }'
+{"id":"pi_1","merchant_id":"m_123","amount":5000,"currency":"usd","status":"requires_payment_method"}%                davidking@Davids-MacBook-Pro ~ % curl -X POST "http://127.0.0.1:8000/v1/webhooks/dispatches/process"
+{"message":"dispatches processed"}%                                                                                   davidking@Davids-MacBook-Pro ~ % curl "http://127.0.0.1:8000/v1/webhooks/deliveries"
+[{"response_status":429,"id":"acc3b2bc-d2e8-4e7f-90fc-1a51a4c42dd0","error_message":null,"next_retry_at":"2026-08-04T16:20:59.655866","created_at":"2026-08-04T16:15:59.657977","webhook_dispatch_id":"9e1fc0ee-84ba-40aa-a967-11dd204a7ead","attempt_number":1,"response_body":"<!DOCTYPE html>\n<html>\n<head>\n    <title>Error: Request limit exceeded. Sign up to unlock more requests. - Webhook.site</title>\n    <link href=\"https://cdn.webhook.site/css/app.css\" rel=\"stylesheet\">\n</head>\n<body>\n<div class=\"container\" style=\"padding: 50px\">\n    <div class=\"row\">\n        <div class=\"col-sm-12 text-center\">\n            <h1><img src=\"https://cdn.webhook.site/icon.png\" alt=\"Webhook.site Logo\" style=\"width:40px; margin-top: -5px\">\n                Webhook.site Error</h1>\n\n            <p class=\"lead\">Request limit exceeded. Sign up to unlock more requests.</p>\n        </div>\n    </div>\n    <div class=\"row\">\n        <div class=\"col-sm-4 col-sm-offset-4 text-center\">\n                            <p>\n    This URL has been rate limited or blocked.\n    This is either because it is not associated with\n    a Webhook.site subscription, or the endpoint has a rate limit.<br>\n    <br>\n    To remove the request limit, you can upgrade to a Webhook.site subscription.\n    <br><br>\n    If you are already subscribed and getting this error, please <a href=\"https://support.webhook.site\">contact Webhook.site Support</a>.\n    <br><br>\n            <a class=\"btn btn-lg btn-success\"  href=\"/register\">Sign Up Now</a>\n                    </p>\n                    </div>\n    </div>\n    <div class=\"row\" style=\"margin-top: 40px\">\n        <div class=\"col-sm-12 text-center\">\n            <p class=\"small\"><a href=\"/\">\n                    <i class=\"bi-house-fill\"></i> Home</a>\n                &emsp;\n                <a href=\"/control-panel\">\n                    <i class=\"bi-gear-fill\">davidking@Davids-MacBook-Pro ~ % 
