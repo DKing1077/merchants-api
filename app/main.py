@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from app.api.routes import payments
 import app.api.routes.webhooks as webhooks
+import app.api.routes.ledger as ledgers
 import app.db.models.models
 from app.core.config import settings
 from app.db.database import create_database_if_missing, Base, engine
@@ -27,4 +28,9 @@ app.include_router(
     tags=["webhooks"],
 )
 
+app.include_router(
+    ledgers.router,
+    prefix="/v1",
+    tags=["ledger"],
+)
 

@@ -112,7 +112,7 @@ class LedgerEntry(Base):
     entry_type = Column(String, nullable=False)
     reference_id = Column(String, nullable=True, index=True)
     description = Column(Text, nullable=True)
-    metadata = Column(JSONB, nullable=True)
+    entry_metadata = Column(JSONB, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

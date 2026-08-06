@@ -1,32 +1,68 @@
-# albemic
+# =========================================================
+# Setup
+# =========================================================
+
+# Install Alembic
 pip install alembic
 alembic init alembic
 
+# Generate and apply migrations
 alembic revision --autogenerate -m "initial schema"
 alembic upgrade head
 
-update:
-    - config.set_main_option("sqlalchemy.url", settings.database_url)
-    - config.set_main_option("sqlalchemy.url", settings.database_url)
+# In alembic/env.py, make sure database URL is loaded from settings
+# config.set_main_option("sqlalchemy.url", settings.database_url)
 
-#start app
+# =========================================================
+# Start app
+# =========================================================
+
+# Start directly
 uvicorn app.main:app --reload
 
-# reset database
-psql -U postgres -d merchants -c "TRUNCATE TABLE payment_intents, events, webhook_endpoints, webhook_dispatches, webhook_deliveries RESTART IDENTITY CASCADE;"
+# Or with your helper script
+./dev.sh
 
-# test webhook flow
+# Root health check
+curl http://127.0.0.1:8000/
 
-## register webhook endpoint
-curl -X POST "http://127.0.0.1:8000/v1/webhooks/endpoints" \
+# Swagger docs
+# Open in browser:
+# http://127.0.0.1:8000/docs
+
+# =========================================================
+# Reset local database
+# =========================================================
+
+# Full reset for local Postgres dev
+psql -U postgres -d merchants -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+
+# After reset:
+# 1. restart the app
+# 2. let tables recreate
+# 3. rerun any seed/test inserts you need
+
+# =========================================================
+# Payment Intent API tests
+# =========================================================
+
+# Create payment intent 1
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/" \
   -H "Content-Type: application/json" \
   -d '{
-    "merchant_id": "m_123",
-    "url": "https://webhook.site/12345678-abcd-1234-abcd-1234567890ab",
-    "event_types": ["payment_intent.created"]
+    "amount": 1000,
+    "currency": "usd"
   }'
 
-## create payment intent
+# Create payment intent 2
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 2500,
+    "currency": "eur"
+  }'
+
+# Create payment intent with merchant_id
 curl -X POST "http://127.0.0.1:8000/v1/payment_intents" \
   -H "Content-Type: application/json" \
   -d '{
@@ -35,13 +71,151 @@ curl -X POST "http://127.0.0.1:8000/v1/payment_intents" \
     "currency": "usd"
   }'
 
-## process dispatches
+# List payment intents
+curl "http://127.0.0.1:8000/v1/payment_intents/"
+
+# Get one payment intent
+curl "http://127.0.0.1:8000/v1/payment_intents/pi_1"
+
+# Confirm payment intent
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/pi_1/confirm"
+
+# Cancel payment intent
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/pi_2/cancel"
+
+# Invalid transition example
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/pi_1/cancel"
+
+# Validation error example
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents/" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": -5,
+    "currency": "us"
+  }'
+
+# =========================================================
+# Webhook API tests
+# =========================================================
+
+# Register webhook endpoint
+curl -X POST "http://127.0.0.1:8000/v1/webhooks/endpoints" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "m_123",
+    "url": "https://webhook.site/12345678-abcd-1234-abcd-1234567890ab",
+    "event_types": ["payment_intent.created"]
+  }'
+
+# Create a payment intent to generate an event
+curl -X POST "http://127.0.0.1:8000/v1/payment_intents" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "merchant_id": "m_123",
+    "amount": 5000,
+    "currency": "usd"
+  }'
+
+# Process queued webhook dispatches
 curl -X POST "http://127.0.0.1:8000/v1/webhooks/dispatches/process"
 
-## inspect deliveries
+# Inspect webhook deliveries
 curl "http://127.0.0.1:8000/v1/webhooks/deliveries"
 
+# =========================================================
+# Ledger API tests
+# =========================================================
 
+# IMPORTANT:
+# Create ledger accounts first directly in Postgres before testing ledger entries.
+# These IDs are used in the curl requests below.
 
+# Insert 2 test ledger accounts
+psql -U postgres -d merchants -c "
+INSERT INTO ledger_accounts (id, merchant_id, account_type, currency, created_at)
+VALUES
+  ('cash_account_1', 'm_123', 'cash', 'USD', NOW()),
+  ('payable_account_1', 'm_123', 'payable', 'USD', NOW());
+"
 
+# Create a balanced ledger entry
+curl -X POST "http://127.0.0.1:8000/v1/ledger/entries" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entry_type": "payment_succeeded",
+    "reference_id": "pay_123",
+    "description": "Test payment",
+    "entry_metadata": {
+      "provider": "stripe"
+    },
+    "postings": [
+      {
+        "account_id": "cash_account_1",
+        "amount": 10000,
+        "currency": "USD"
+      },
+      {
+        "account_id": "payable_account_1",
+        "amount": -10000,
+        "currency": "USD"
+      }
+    ]
+  }'
 
+# Get balance for cash account
+curl "http://127.0.0.1:8000/v1/ledger/accounts/cash_account_1/balance"
+
+# Get balance for payable account
+curl "http://127.0.0.1:8000/v1/ledger/accounts/payable_account_1/balance"
+
+# Failure test: unbalanced ledger entry
+curl -X POST "http://127.0.0.1:8000/v1/ledger/entries" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "entry_type": "payment_succeeded",
+    "reference_id": "pay_124",
+    "description": "Bad test payment",
+    "entry_metadata": {
+      "provider": "stripe"
+    },
+    "postings": [
+      {
+        "account_id": "cash_account_1",
+        "amount": 10000,
+        "currency": "USD"
+      },
+      {
+        "account_id": "payable_account_1",
+        "amount": -9000,
+        "currency": "USD"
+      }
+    ]
+  }'
+
+# =========================================================
+# Optional DB inspection queries
+# =========================================================
+
+# View ledger accounts
+psql -U postgres -d merchants -c "SELECT * FROM ledger_accounts;"
+
+# View ledger entries
+psql -U postgres -d merchants -c "SELECT * FROM ledger_entries;"
+
+# View ledger postings
+psql -U postgres -d merchants -c "SELECT * FROM ledger_postings;"
+
+# View payment intents
+psql -U postgres -d merchants -c "SELECT * FROM payment_intents;"
+
+# View events
+psql -U postgres -d merchants -c "SELECT * FROM events;"
+
+# View webhook endpoints
+psql -U postgres -d merchants -c "SELECT * FROM webhook_endpoints;"
+
+# View webhook dispatches
+psql -U postgres -d merchants -c "SELECT * FROM webhook_dispatches;"
+
+# View webhook deliveries
+psql -U postgres -d merchants -c "SELECT * FROM webhook_deliveries;"
