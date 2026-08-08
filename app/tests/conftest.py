@@ -1,6 +1,7 @@
 import os
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
+_TEST_DATABASE_URL = "sqlite:///:memory:"
+os.environ.setdefault("DATABASE_URL", _TEST_DATABASE_URL)
 
 # SQLite does not support JSONB; swap it for generic JSON before any model imports.
 from sqlalchemy import JSON
@@ -10,6 +11,7 @@ _pg_dialect.JSONB = JSON  # type: ignore[attr-defined]
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 
 # Patch out the PostgreSQL-only helper before the app is imported.
@@ -20,10 +22,10 @@ _db_module.create_database_if_missing = lambda: None
 from app.db.database import Base, get_db
 from app.main import app
 
-TEST_DATABASE_URL = "sqlite:///./test.db"
-
 engine = create_engine(
-    TEST_DATABASE_URL, connect_args={"check_same_thread": False}
+    _TEST_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
