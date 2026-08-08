@@ -1,0 +1,380 @@
+===================================================================
+  MERCHANTS API — STUDY NOTES
+  Use these notes to test yourself on routes, services, models,
+  schemas, and their relationships.
+===================================================================
+
+-------------------------------------------------------------------
+1. PROJECT STRUCTURE
+-------------------------------------------------------------------
+app/
+  main.py              – FastAPI app entry point; registers routers
+  api/routes/          – HTTP route handlers (thin; delegate to services)
+    payments.py
+    refunds.py
+    ledger.py
+    webhooks.py
+    timestamps.py
+  services/            – Business logic
+    payment_service.py
+    refunds_service.py
+    ledger_service.py
+    events.py
+    dispatch.py
+    delivery.py
+    timestamp_service.py
+  db/
+    database.py        – SQLAlchemy engine, session, Base
+    models/
+      models.py        – All ORM models
+      idempotency_models.py – IdempotencyKey model
+  schemas/             – Pydantic request/response models & enums
+    payments_schemas.py
+    refunds_schemas.py
+    ledger_schemas.py
+    webhook_schemas.py
+  core/
+    exceptions.py      – Custom exception classes
+    config.py          – App settings (database_url, app_name)
+  tests/               – Pytest tests per feature area
+
+
+-------------------------------------------------------------------
+2. DATABASE MODELS  (app/db/models/models.py)
+-------------------------------------------------------------------
+PaymentIntent
+  - id            String PK  (e.g. "pi_1", "pi_2")
+  - merchant_id   String
+  - amount        Integer
+  - currency      String(3)
+  - status        String  (see PaymentIntentStatus enum)
+  - idempotency_key  String unique nullable
+  - is_flagged    Boolean default False
+  - review_status String nullable
+  - review_reason Text nullable
+  - created_at / updated_at  DateTime
+
+Refunds
+  - id                String PK unique
+  - merchant_id       String
+  - payment_intent_id String FK → payment_intents.id
+  - amount            Integer
+  - status            String  (see RefundStatus enum)
+  - idempotency_key   String unique nullable
+  - created_at / updated_at  DateTime
+
+Event
+  - id         String PK  (uuid)
+  - type       String indexed  (e.g. "payment_intent.created")
+  - object_id  String indexed  (id of the object that changed)
+  - payload    JSONB
+  - created_at DateTime
+
+WebhookEndpoint
+  - id           String PK (uuid)
+  - merchant_id  String
+  - url          Text
+  - event_types  JSONB  (list of event type strings to subscribe to)
+  - secret       String (hex token auto-generated)
+  - is_active    Boolean default True
+  - created_at / updated_at  DateTime
+
+WebhookDispatch
+  - id                   String PK (uuid)
+  - event_id             String FK → events.id
+  - webhook_endpoint_id  String FK → webhook_endpoints.id
+  - payload              JSONB
+  - status               String  ("pending" | "success" | "failed")
+  - created_at           DateTime
+
+WebhookDelivery
+  - id                    String PK (uuid)
+  - webhook_dispatch_id   String FK → webhook_dispatches.id
+  - attempt_number        Integer default 1
+  - response_status       Integer nullable
+  - response_body         Text nullable
+  - error_message         Text nullable
+  - status                String  ("pending" | "success" | "failed")
+  - next_retry_at         DateTime nullable
+  - delivered_at          DateTime nullable
+  - created_at            DateTime
+
+LedgerAccount
+  - id           String PK (uuid)
+  - merchant_id  String
+  - account_type String
+  - currency     String(3)
+  - created_at   DateTime
+
+LedgerEntry
+  - id             String PK (uuid)
+  - entry_type     String
+  - reference_id   String nullable indexed
+  - description    Text nullable
+  - entry_metadata JSONB nullable
+  - created_at     DateTime
+
+LedgerPosting  (one movement line within a LedgerEntry)
+  - id         String PK (uuid)
+  - entry_id   String FK → ledger_entries.id
+  - account_id String FK → ledger_accounts.id
+  - amount     Integer  (positive = credit, negative = debit convention)
+  - currency   String(3)
+  - created_at DateTime
+
+IdempotencyKey  (app/db/models/idempotency_models.py)
+  - key           String PK
+  - request_hash  String
+  - resource_type String
+  - resource_id   String
+
+
+-------------------------------------------------------------------
+3. SCHEMAS / ENUMS  (app/schemas/)
+-------------------------------------------------------------------
+PaymentIntentStatus (str Enum)
+  requires_payment_method | requires_confirmation |
+  requires_capture | succeeded | canceled
+
+ReviewStatus (str Enum)
+  pending_review | approved | rejected
+
+PaymentIntentResponse (Pydantic)
+  id, merchant_id, amount, currency, status,
+  is_flagged, review_status (opt), review_reason (opt)
+
+CreatePaymentIntentRequest
+  merchant_id, amount, currency
+
+FlagPaymentIntentRequest
+  reason: str
+
+ReviewPaymentIntentRequest
+  review_status: ReviewStatus
+
+---
+
+RefundStatus (str Enum)
+  pending | confirmed | declined | canceled
+
+---
+
+LedgerPostingCreate
+  account_id, amount (int), currency (3-char)
+
+LedgerEntryCreate
+  entry_type, reference_id (opt), description (opt),
+  entry_metadata (opt dict), postings: list[LedgerPostingCreate]
+
+LedgerEntryResponse
+  id, entry_type, reference_id, description, entry_metadata, created_at
+
+LedgerBalanceResponse
+  account_id, balance (int)
+
+---
+
+WebhookEndpointCreate
+  merchant_id, url (HttpUrl), event_types: List[str]
+
+WebhookEndpointResponse
+  id, merchant_id, url, event_types, is_active, created_at
+
+
+-------------------------------------------------------------------
+4. CUSTOM EXCEPTIONS  (app/core/exceptions.py)
+-------------------------------------------------------------------
+PaymentIntentNotFoundError    – payment intent id does not exist
+InvalidPaymentIntentStateError – transition not allowed for current status
+RefundNotFoundError           – refund not found
+RefundStateError              – refund transition not allowed
+InvalidTimestamp              – timestamp service error
+IdempotencyConflictError      – idempotency key used with different data
+
+
+-------------------------------------------------------------------
+5. ROUTES  (app/api/routes/)
+-------------------------------------------------------------------
+
+── PAYMENT INTENTS  prefix: /v1/payment_intents ──────────────────
+GET    /                           list all payment intents
+POST   /                           create payment intent
+         header: Idempotency-Key (optional)
+         body: CreatePaymentIntentRequest
+         → 409 if idempotency conflict
+GET    /admin/flagged              list flagged payment intents
+GET    /transactions               list transactions for all intents
+GET    /{id}/transactions          list transactions for one intent
+GET    /{id}                       get single payment intent
+POST   /{id}/flag                  flag a payment intent
+         body: FlagPaymentIntentRequest {reason}
+POST   /admin/{id}/review          set review status on flagged intent
+         body: ReviewPaymentIntentRequest {review_status}
+POST   /{id}/confirm               confirm → requires_capture
+POST   /{id}/capture               capture → succeeded
+POST   /{id}/cancel                cancel
+
+── REFUNDS  (mounted inside payments router) ─────────────────────
+GET    /                           list all refunds
+POST   /{payment_intent_id}/refunds  create refund
+GET    /{refund_id}/refunds          get refund by payment_intent_id
+POST   /{refund_id}/confirm          confirm a pending refund
+GET    /{refund_id}/decline          decline a pending refund
+GET    /{refund_id}/cancel           cancel a pending refund
+
+── LEDGER  prefix: /v1/ledger ───────────────────────────────────
+POST   /entries                    create a ledger entry (requires ≥2
+                                   balanced postings that sum to 0)
+GET    /accounts/{account_id}/balance  get summed balance for account
+
+── WEBHOOKS  prefix: /v1/webhooks ───────────────────────────────
+POST   /endpoints                  register a webhook endpoint
+         body: WebhookEndpointCreate; secret auto-generated
+GET    /endpoints                  list all webhook endpoints
+GET    /dispatches                 list all webhook dispatches
+GET    /deliveries                 list all webhook delivery attempts
+POST   /dispatches/process         trigger delivery of pending dispatches
+
+── TIMESTAMPS  (not registered in main.py yet) ───────────────────
+GET    /created_at                 get created_at timestamp
+GET    /updated_at                 get updated_at timestamp
+
+
+-------------------------------------------------------------------
+6. SERVICES
+-------------------------------------------------------------------
+
+payment_service.py
+  create_payment_intent(db, amount, currency, merchant_id, idempotency_key)
+    – Idempotency: if key exists returns existing record
+    – Assigns sequential id: "pi_{count+1}"
+    – Initial status: requires_payment_method
+    – Fires event: payment_intent.created → dispatches webhooks
+  get_payment_intent(db, id)        → raises PaymentIntentNotFoundError
+  list_payment_intents(db)
+  list_flagged_payment_intents(db)
+  flag_payment_intent(db, id, reason)
+    – Sets is_flagged=True, review_status="pending_review"
+  review_payment_intent(db, id, review_status)
+    – Raises InvalidPaymentIntentStateError if not flagged
+  confirm_payment_intent(db, id)
+    – Blocked if: canceled, succeeded, already requires_capture, rejected
+    – Status → requires_capture; fires payment_intent.confirmed event
+  capture_payment_intent(db, id)
+    – Blocked if: canceled, succeeded, not requires_capture, rejected
+    – Status → succeeded; fires payment_intent.succeeded event
+  cancel_payment_intent(db, id)
+    – Blocked if: succeeded, already canceled
+    – Status → canceled; fires payment_intent.canceled event
+  list_payment_intent_transactions(db, id)
+    – Synthesizes transaction list from current status
+  list_transactions(db)
+    – Calls above for every payment intent
+
+refunds_service.py
+  create_refund(payment_intent_id, refund_amount, db, idempotency_key)
+    – Idempotency check
+    – Validates: amount > 0; amount ≤ payment amount
+    – Initial status: pending; fires refund.created event
+  get_refund(payment_intent_id, db)  → by payment_intent_id FK
+  list_refunds(db)
+  confirm_refund(payment_intent_id, db)
+    – Must be pending; → confirmed; fires refund.confirmed
+  decline_refund(payment_intent_id, db)
+    – Must be pending; → declined; fires refund.declined
+  cancel_refund(payment_intent_id, db)
+    – Must be pending; → canceled; fires refund.canceled
+
+ledger_service.py
+  create_ledger_entry(db, entry_type, reference_id, description,
+                      entry_metadata, postings)
+    – Validates: ≥2 postings; postings must sum to 0
+    – Creates LedgerEntry + LedgerPosting rows
+  get_account_balance(db, account_id)
+    – SUMs all LedgerPosting.amount where account_id matches
+
+events.py
+  create_event(db, event_type, object_id, payload)
+    – Creates an Event row; db.flush() so id is available immediately
+
+dispatch.py
+  create_dispatches_for_event(db, merchant_id, event)
+    – Queries active WebhookEndpoints for merchant
+    – Creates a WebhookDispatch for each endpoint that subscribes
+      to event.type
+  list_dispatches(db)
+
+delivery.py
+  process_pending_dispatches(db)
+    – Finds all WebhookDispatches with status="pending"
+    – For each: POST payload to endpoint URL via httpx (timeout 5s)
+    – Success (2xx): WebhookDelivery status="success"; dispatch done
+    – Failure: records error; retry up to 3 attempts (next_retry_at +5min)
+    – After 3 failures: dispatch.status="failed"
+
+
+-------------------------------------------------------------------
+7. DATABASE SETUP  (app/db/database.py)
+-------------------------------------------------------------------
+- engine = create_engine(settings.database_url)
+- get_db()  – FastAPI dependency; yields a Session, closes after request
+- create_database_if_missing()
+    – Connects to "postgres" admin DB; creates target DB if absent
+- main.py calls create_database_if_missing() then Base.metadata.create_all()
+
+
+-------------------------------------------------------------------
+8. LIFECYCLE / STATE MACHINES
+-------------------------------------------------------------------
+PaymentIntent status flow:
+  requires_payment_method
+    → (confirm) → requires_capture
+    → (capture) → succeeded
+  Any non-succeeded state → (cancel) → canceled
+  Flagged + review_status="rejected" blocks confirm and capture
+
+Refund status flow:
+  pending → confirmed
+  pending → declined
+  pending → canceled
+
+WebhookDispatch status flow:
+  pending → success  (delivery 2xx)
+  pending → pending  (failure, attempts < 3, retry queued)
+  pending → failed   (failure, attempts >= 3)
+
+
+-------------------------------------------------------------------
+9. IDEMPOTENCY PATTERN
+-------------------------------------------------------------------
+- Routes accept optional header: Idempotency-Key
+- Services check if a record with that key already exists
+- If yes → return existing record immediately (no duplicate created)
+- Used in: create_payment_intent, create_refund
+
+
+-------------------------------------------------------------------
+10. WEBHOOK FAN-OUT FLOW (end to end)
+-------------------------------------------------------------------
+1. Route calls service (e.g. confirm_payment_intent)
+2. Service calls create_event()  → inserts Event row
+3. Service calls create_dispatches_for_event()
+   → finds matching active endpoints for merchant
+   → inserts WebhookDispatch per endpoint
+4. POST /v1/webhooks/dispatches/process triggers delivery.py
+   → process_pending_dispatches() sends HTTP POSTs
+   → records WebhookDelivery rows with result
+
+
+-------------------------------------------------------------------
+11. QUICK REFERENCE — HTTP STATUS CODES USED
+-------------------------------------------------------------------
+201  Created               – POST payment_intent success
+404  Not Found             – resource not found
+409  Conflict              – invalid state transition / idempotency
+400  Bad Request           – ledger validation failure (bad postings)
+
+
+-------------------------------------------------------------------
+END OF NOTES
+===================================================================
