@@ -1,6 +1,10 @@
 from fastapi import APIRouter, Depends, Header, HTTPException
 from app.db.database import get_db
-from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError, IdempotencyConflictError
+from app.core.exceptions import (
+    InvalidPaymentIntentStateError,
+    PaymentIntentNotFoundError,
+    IdempotencyConflictError,
+)
 from app.schemas.payments_schemas import (
     CreatePaymentIntentRequest,
     PaymentIntentResponse,
@@ -17,6 +21,8 @@ from app.services.payment_service import (
     flag_payment_intent,
     review_payment_intent,
     list_flagged_payment_intents,
+    list_payment_intent_transactions,
+    list_transactions,
 )
 
 router = APIRouter()
@@ -45,6 +51,24 @@ def create_payment_intent_route(
         raise HTTPException(status_code=409, detail=str(exc))
 
 
+@router.get("/admin/flagged")
+def list_flagged_payment_intents_route(db=Depends(get_db)):
+    return {"payment_intents": list_flagged_payment_intents(db)}
+
+
+@router.get("/transactions")
+def list_transactions_route(db=Depends(get_db)):
+    return {"transactions": list_transactions(db)}
+
+
+@router.get("/{payment_intent_id}/transactions")
+def list_payment_intent_transactions_route(payment_intent_id, db=Depends(get_db)):
+    try:
+        return {"transactions": list_payment_intent_transactions(db, payment_intent_id)}
+    except PaymentIntentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+
 @router.get("/{payment_intent_id}", response_model=PaymentIntentResponse)
 def get_payment_intent_route(payment_intent_id, db=Depends(get_db)):
     try:
@@ -54,7 +78,9 @@ def get_payment_intent_route(payment_intent_id, db=Depends(get_db)):
 
 
 @router.post("/{payment_intent_id}/flag", response_model=PaymentIntentResponse)
-def flag_payment_intent_route(payment_intent_id, request: FlagPaymentIntentRequest, db=Depends(get_db)):
+def flag_payment_intent_route(
+    payment_intent_id, request: FlagPaymentIntentRequest, db=Depends(get_db)
+):
     try:
         return flag_payment_intent(db, payment_intent_id, request.reason)
     except PaymentIntentNotFoundError as exc:
@@ -63,13 +89,10 @@ def flag_payment_intent_route(payment_intent_id, request: FlagPaymentIntentReque
         raise HTTPException(status_code=409, detail=str(exc))
 
 
-@router.get("/admin/flagged")
-def list_flagged_payment_intents_route(db=Depends(get_db)):
-    return {"payment_intents": list_flagged_payment_intents(db)}
-
-
 @router.post("/admin/{payment_intent_id}/review", response_model=PaymentIntentResponse)
-def review_payment_intent_route(payment_intent_id, request: ReviewPaymentIntentRequest, db=Depends(get_db)):
+def review_payment_intent_route(
+    payment_intent_id, request: ReviewPaymentIntentRequest, db=Depends(get_db)
+):
     try:
         return review_payment_intent(db, payment_intent_id, request.review_status.value)
     except PaymentIntentNotFoundError as exc:

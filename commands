@@ -101,6 +101,16 @@ curl -X POST "http://127.0.0.1:8000/v1/payment_intents" \
   }'
 
 # =========================================================
+# Transaction History API tests
+# =========================================================
+
+# Get transactions for one payment intent
+curl "http://127.0.0.1:8000/v1/payment_intents/pi_1/transactions"
+
+# List all transactions
+curl "http://127.0.0.1:8000/v1/payment_intents/transactions"
+
+# =========================================================
 # Suspicious / Review Flow tests
 # =========================================================
 
@@ -262,4 +272,3 @@ psql -U postgres -d merchants -c "SELECT * FROM ledger_entries;"
 
 # View ledger postings
 psql -U postgres -d merchants -c "SELECT * FROM ledger_postings;"
-

@@ -66,6 +66,74 @@ def list_payment_intents(db):
     return db.query(PaymentIntent).all()
 
 
+def list_payment_intent_transactions(db, payment_intent_id):
+    payment_intent = get_payment_intent(db, payment_intent_id)
+
+    transactions = []
+
+    transactions.append(
+        {
+            "id": f"txn_{payment_intent.id}_created",
+            "type": "payment_intent.created",
+            "payment_intent_id": payment_intent.id,
+            "amount": payment_intent.amount,
+            "currency": payment_intent.currency,
+            "status": payment_intent.status,
+        }
+    )
+
+    if payment_intent.status in [
+        PaymentIntentStatus.requires_capture.value,
+        PaymentIntentStatus.succeeded.value,
+    ]:
+        transactions.append(
+            {
+                "id": f"txn_{payment_intent.id}_confirmed",
+                "type": "payment_intent.confirmed",
+                "payment_intent_id": payment_intent.id,
+                "amount": payment_intent.amount,
+                "currency": payment_intent.currency,
+                "status": PaymentIntentStatus.requires_capture.value,
+            }
+        )
+
+    if payment_intent.status == PaymentIntentStatus.succeeded.value:
+        transactions.append(
+            {
+                "id": f"txn_{payment_intent.id}_captured",
+                "type": "payment_intent.captured",
+                "payment_intent_id": payment_intent.id,
+                "amount": payment_intent.amount,
+                "currency": payment_intent.currency,
+                "status": PaymentIntentStatus.succeeded.value,
+            }
+        )
+
+    if payment_intent.status == PaymentIntentStatus.canceled.value:
+        transactions.append(
+            {
+                "id": f"txn_{payment_intent.id}_canceled",
+                "type": "payment_intent.canceled",
+                "payment_intent_id": payment_intent.id,
+                "amount": payment_intent.amount,
+                "currency": payment_intent.currency,
+                "status": PaymentIntentStatus.canceled.value,
+            }
+        )
+
+    return transactions
+
+
+def list_transactions(db):
+    payment_intents = db.query(PaymentIntent).all()
+    transactions = []
+
+    for payment_intent in payment_intents:
+        transactions.extend(list_payment_intent_transactions(db, payment_intent.id))
+
+    return transactions
+
+
 def list_flagged_payment_intents(db):
     return (
         db.query(PaymentIntent)
