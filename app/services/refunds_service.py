@@ -1,39 +1,34 @@
-from app.db.models.models import Refunds, PaymentIntent
+from app.db.models.models import Refunds, PaymentIntent, LedgerAccount
 from app.core.exceptions import RefundStateError, RefundNotFoundError
 from app.schemas.refunds_schemas import RefundStatus
 from app.services.events import create_event
 from app.services.dispatch import create_dispatches_for_event
+from app.services.ledger_service import create_ledger_entry
 
 
 def list_refunds(db):
     return db.query(Refunds).all()
 
 
+def list_flagged_refunds(db):
+    return db.query(Refunds).filter(Refunds.is_flagged == True).all()
+
+
 def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None):
     if idempotency_key:
-        existing = (
-            db.query(Refunds)
-            .filter(Refunds.idempotency_key == idempotency_key)
-            .first()
-        )
+        existing = db.query(Refunds).filter(Refunds.idempotency_key == idempotency_key).first()
         if existing:
             return existing
 
-    payment_intent = (
-        db.query(PaymentIntent)
-        .filter(PaymentIntent.id == payment_intent_id)
-        .first()
-    )
+    payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == payment_intent_id).first()
     if not payment_intent:
         raise RefundNotFoundError(
             f"Refund intent with payment_intent_id {payment_intent_id} not found"
         )
 
-    payment_amount = payment_intent.amount
-
     if refund_amount <= 0:
         raise RefundStateError("Refund amount has to be greater than 0")
-    elif refund_amount > payment_amount:
+    if refund_amount > payment_intent.amount:
         raise RefundStateError("Refund amount should not be greater than payment amount")
 
     refund = Refunds(
@@ -41,6 +36,10 @@ def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None):
         amount=refund_amount,
         status=RefundStatus.pending,
         idempotency_key=idempotency_key,
+        merchant_id=payment_intent.merchant_id,
+        is_flagged=False,
+        review_status=None,
+        review_reason=None,
     )
     db.add(refund)
     db.flush()
@@ -62,104 +61,117 @@ def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None):
     return refund
 
 
-def get_refund(payment_intent_id, db):
-    refund = (
-        db.query(Refunds)
-        .filter(Refunds.payment_intent_id == payment_intent_id)
-        .first()
-    )
+def get_refund(refund_id, db):
+    refund = db.query(Refunds).filter(Refunds.id == refund_id).first()
     if not refund:
-        raise RefundNotFoundError(
-            f"Refund intent with payment_intent_id {payment_intent_id} not found"
-        )
+        raise RefundNotFoundError(f"Refund {refund_id} not found")
     return refund
 
 
-def confirm_refund(payment_intent_id, db):
-    refund = get_refund(payment_intent_id, db)
+def flag_refund(db, refund_id, reason):
+    refund = get_refund(refund_id, db)
+    refund.is_flagged = True
+    refund.review_status = "pending_review"
+    refund.review_reason = reason
+    db.commit()
+    db.refresh(refund)
+    return refund
+
+
+def review_refund(db, refund_id, review_status):
+    refund = get_refund(refund_id, db)
+    if not refund.is_flagged:
+        raise RefundStateError(f"Refund {refund_id} is not flagged for review")
+    refund.review_status = review_status
+    db.commit()
+    db.refresh(refund)
+    return refund
+
+
+def confirm_refund(refund_id, db):
+    refund = get_refund(refund_id, db)
     if refund.status != RefundStatus.pending:
-        raise RefundStateError(
-            f"Refund intent with payment_intent_id {payment_intent_id} is not in a pending state"
-        )
+        raise RefundStateError(f"Refund {refund_id} is not in a pending state")
+    if refund.review_status == "rejected":
+        raise RefundStateError(f"Cannot confirm rejected refund {refund_id}")
 
     refund.status = RefundStatus.confirmed
+    payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == refund.payment_intent_id).first()
 
-    payment_intent = (
-        db.query(PaymentIntent)
-        .filter(PaymentIntent.id == refund.payment_intent_id)
-        .first()
-    )
+    cash = db.query(LedgerAccount).filter(
+        LedgerAccount.merchant_id == payment_intent.merchant_id,
+        LedgerAccount.account_type == "cash",
+        LedgerAccount.currency == payment_intent.currency,
+    ).first()
+    payable = db.query(LedgerAccount).filter(
+        LedgerAccount.merchant_id == payment_intent.merchant_id,
+        LedgerAccount.account_type == "merchant_payable",
+        LedgerAccount.currency == payment_intent.currency,
+    ).first()
+
+    if cash and payable:
+        create_ledger_entry(
+            db=db,
+            entry_type="refund_confirmed",
+            reference_id=refund.id,
+            description=f"Refund confirmed for {refund.id}",
+            entry_metadata={"merchant_id": payment_intent.merchant_id},
+            postings=[
+                {"account_id": payable.id, "amount": refund.amount, "currency": payment_intent.currency},
+                {"account_id": cash.id, "amount": -refund.amount, "currency": payment_intent.currency},
+            ],
+        )
 
     event = create_event(
         db=db,
         event_type="refund.confirmed",
         object_id=refund.id,
-        payload={
-            "id": refund.id,
-            "status": refund.status,
-        },
+        payload={"id": refund.id, "status": refund.status},
     )
     create_dispatches_for_event(db, payment_intent.merchant_id, event)
 
     db.commit()
+    db.refresh(refund)
     return refund
 
 
-def decline_refund(payment_intent_id, db):
-    refund = get_refund(payment_intent_id, db)
+def decline_refund(refund_id, db):
+    refund = get_refund(refund_id, db)
     if refund.status != RefundStatus.pending:
-        raise RefundStateError(
-            f"Refund intent with payment_intent_id {payment_intent_id} is not in a pending state"
-        )
+        raise RefundStateError(f"Refund {refund_id} is not in a pending state")
 
     refund.status = RefundStatus.declined
-
-    payment_intent = (
-        db.query(PaymentIntent)
-        .filter(PaymentIntent.id == refund.payment_intent_id)
-        .first()
-    )
+    payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == refund.payment_intent_id).first()
 
     event = create_event(
         db=db,
         event_type="refund.declined",
         object_id=refund.id,
-        payload={
-            "id": refund.id,
-            "status": refund.status,
-        },
+        payload={"id": refund.id, "status": refund.status},
     )
     create_dispatches_for_event(db, payment_intent.merchant_id, event)
 
     db.commit()
+    db.refresh(refund)
     return refund
 
 
-def cancel_refund(payment_intent_id, db):
-    refund = get_refund(payment_intent_id, db)
+def cancel_refund(refund_id, db):
+    refund = get_refund(refund_id, db)
     if refund.status != RefundStatus.pending:
-        raise RefundStateError(
-            f"Refund intent with payment_intent_id {payment_intent_id} is not in a pending state"
-        )
+        raise RefundStateError(f"Refund {refund_id} is not in a pending state")
 
     refund.status = RefundStatus.canceled
-
-    payment_intent = (
-        db.query(PaymentIntent)
-        .filter(PaymentIntent.id == refund.payment_intent_id)
-        .first()
-    )
+    payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == refund.payment_intent_id).first()
 
     event = create_event(
         db=db,
         event_type="refund.canceled",
         object_id=refund.id,
-        payload={
-            "id": refund.id,
-            "status": refund.status,
-        },
+        payload={"id": refund.id, "status": refund.status},
     )
     create_dispatches_for_event(db, payment_intent.merchant_id, event)
 
     db.commit()
+    db.refresh(refund)
     return refund

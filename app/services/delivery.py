@@ -1,5 +1,8 @@
 from app.db.models import WebhookDispatch, WebhookEndpoint, WebhookDelivery
 from datetime import datetime, timedelta
+import hashlib
+import hmac
+import json
 import httpx
 
 
@@ -11,7 +14,22 @@ def process_pending_dispatches(db):
         attempts = db.query(WebhookDelivery).filter(WebhookDelivery.webhook_dispatch_id == dispatch.id).count() + 1
 
         try:
-            response = httpx.post(endpoint.url, json=dispatch.payload, timeout=5.0)
+            payload_json = json.dumps(dispatch.payload, separators=(",", ":"), sort_keys=True)
+            signature = hmac.new(
+                endpoint.secret.encode(),
+                payload_json.encode(),
+                hashlib.sha256,
+            ).hexdigest()
+
+            response = httpx.post(
+                endpoint.url,
+                content=payload_json,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Webhook-Signature": f"sha256={signature}",
+                },
+                timeout=5.0,
+            )
             success = 200 <= response.status_code < 300
 
             db.add(WebhookDelivery(

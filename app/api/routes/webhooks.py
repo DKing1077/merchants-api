@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.db.database import get_db
 from app.schemas.webhook_schemas import WebhookEndpointCreate, WebhookEndpointResponse
@@ -31,9 +31,52 @@ def list_webhook_endpoints(db: Session = Depends(get_db)):
     return db.query(WebhookEndpoint).all()
 
 
+@router.put("/endpoints/{endpoint_id}", response_model=WebhookEndpointResponse)
+def update_webhook_endpoint(
+    endpoint_id: str,
+    payload: WebhookEndpointCreate,
+    db: Session = Depends(get_db),):
+    endpoint = db.query(WebhookEndpoint).filter(WebhookEndpoint.id == endpoint_id).first()
+    if not endpoint:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+
+    endpoint.merchant_id = payload.merchant_id
+    endpoint.url = str(payload.url)
+    endpoint.event_types = payload.event_types
+
+    db.commit()
+    db.refresh(endpoint)
+    return endpoint
+
+
+@router.delete("/endpoints/{endpoint_id}")
+def delete_webhook_endpoint(endpoint_id: str, db: Session = Depends(get_db)):
+    endpoint = db.query(WebhookEndpoint).filter(WebhookEndpoint.id == endpoint_id).first()
+    if not endpoint:
+        raise HTTPException(status_code=404, detail="Webhook endpoint not found")
+
+    db.delete(endpoint)
+    db.commit()
+    return {"message": "webhook endpoint deleted"}
+
+
 @router.get("/dispatches")
-def list_webhook_dispatches(db: Session = Depends(get_db)):
-    return db.query(WebhookDispatch).all()
+def list_webhook_dispatches(
+    merchant_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    db: Session = Depends(get_db),):
+    query = db.query(WebhookDispatch)
+
+    if merchant_id:
+        query = query.join(
+            WebhookEndpoint,
+            WebhookEndpoint.id == WebhookDispatch.webhook_endpoint_id,
+        ).filter(WebhookEndpoint.merchant_id == merchant_id)
+
+    if status:
+        query = query.filter(WebhookDispatch.status == status)
+
+    return query.all()
 
 
 @router.get("/deliveries")

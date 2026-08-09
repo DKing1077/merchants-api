@@ -3,6 +3,23 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class LedgerAccountCreate(BaseModel):
+    name: str
+    account_type: str
+    currency: str = Field(..., min_length=3, max_length=3)
+    merchant_id: str | None = None
+
+
+class LedgerAccountResponse(BaseModel):
+    id: str
+    name: str
+    account_type: str
+    currency: str
+    merchant_id: str | None = None
+    created_at: datetime
+    model_config = {"from_attributes": True}
+
+
 class LedgerPostingCreate(BaseModel):
     account_id: str
     amount: int
@@ -24,7 +41,6 @@ class LedgerEntryResponse(BaseModel):
     description: str | None
     entry_metadata: dict[str, Any] | None
     created_at: datetime
-
     model_config = {"from_attributes": True}
 
 

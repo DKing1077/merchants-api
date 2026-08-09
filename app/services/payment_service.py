@@ -1,8 +1,9 @@
 from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError
 from app.schemas.payments_schemas import PaymentIntentStatus
-from app.db.models.models import PaymentIntent
+from app.db.models.models import PaymentIntent, LedgerAccount
 from app.services.events import create_event
 from app.services.dispatch import create_dispatches_for_event
+from app.services.ledger_service import create_ledger_entry
 
 
 def create_payment_intent(db, amount, currency, merchant_id, idempotency_key=None):
@@ -135,20 +136,14 @@ def list_transactions(db):
 
 
 def list_flagged_payment_intents(db):
-    return (
-        db.query(PaymentIntent)
-        .filter(PaymentIntent.is_flagged == True)
-        .all()
-    )
+    return db.query(PaymentIntent).filter(PaymentIntent.is_flagged == True).all()
 
 
 def flag_payment_intent(db, payment_intent_id, reason):
     payment_intent = get_payment_intent(db, payment_intent_id)
-
     payment_intent.is_flagged = True
     payment_intent.review_status = "pending_review"
     payment_intent.review_reason = reason
-
     db.commit()
     db.refresh(payment_intent)
     return payment_intent
@@ -163,7 +158,6 @@ def review_payment_intent(db, payment_intent_id, review_status):
         )
 
     payment_intent.review_status = review_status
-
     db.commit()
     db.refresh(payment_intent)
     return payment_intent
@@ -211,6 +205,30 @@ def capture_payment_intent(db, payment_intent_id):
         raise InvalidPaymentIntentStateError(f"Cannot capture rejected payment intent {payment_intent_id}")
 
     payment_intent.status = PaymentIntentStatus.succeeded.value
+
+    cash = db.query(LedgerAccount).filter(
+        LedgerAccount.merchant_id == payment_intent.merchant_id,
+        LedgerAccount.account_type == "cash",
+        LedgerAccount.currency == payment_intent.currency,
+    ).first()
+    payable = db.query(LedgerAccount).filter(
+        LedgerAccount.merchant_id == payment_intent.merchant_id,
+        LedgerAccount.account_type == "merchant_payable",
+        LedgerAccount.currency == payment_intent.currency,
+    ).first()
+
+    if cash and payable:
+        create_ledger_entry(
+            db=db,
+            entry_type="payment_succeeded",
+            reference_id=payment_intent.id,
+            description=f"Payment captured for {payment_intent.id}",
+            entry_metadata={"merchant_id": payment_intent.merchant_id},
+            postings=[
+                {"account_id": cash.id, "amount": payment_intent.amount, "currency": payment_intent.currency},
+                {"account_id": payable.id, "amount": -payment_intent.amount, "currency": payment_intent.currency},
+            ],
+        )
 
     event = create_event(
         db=db,
