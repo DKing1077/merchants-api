@@ -1,0 +1,40 @@
+Payments:
+    list payment intents → none + none + payment intents
+    create payment intent → requires_payment_method + payment_intent.created + merchant_id, amount, currency, idempotency_key
+    list flagged payment intents → none + none + flagged payment intents
+    list all transactions → none + none + transactions
+    list payment intent transactions → none + none + payment intent transactions
+    get payment intent → none + none + payment intent
+    flag payment intent → is_flagged=True, review_status=pending_review, review_reason=<reason> + none + is_flagged, review_status, review_reason
+    review payment intent → review_status updated + none + review_status
+    confirm → requires_capture + payment_intent.confirmed + status
+    capture → succeeded + payment_intent.succeeded + status
+    cancel → canceled + payment_intent.canceled + status
+
+Refunds:
+    list refunds → none + none + refunds
+    create refund → pending + refund.created + payment_intent_id, amount, status, idempotency_key
+    get refund → none + none + refund
+    confirm refund → confirmed + refund.confirmed + status
+    decline refund → declined + refund.declined + status
+    cancel refund → canceled + refund.canceled + status
+
+Timestamps:
+    get created_at → none + none + created_at
+    get updated_at → none + none + updated_at
+
+Ledgers:
+    create ledger entry → none + none + entry_type, reference_id, description, entry_metadata, postings
+    get account balance → none + none + account_id, balance
+
+Webhooks:
+    create webhook endpoint → is_active=True + none + id, merchant_id, url, event_types, secret, is_active
+    list webhook endpoints → none + none + webhook endpoints
+    list webhook dispatches → none + none + webhook dispatches
+    list webhook deliveries → none + none + webhook deliveries
+    create dispatches for event → status=pending + none + event_id, webhook_endpoint_id, payload, status
+    process dispatches → dispatch status=success/failed/pending + none + response_status, response_body,
+    delivered_at, next_retry_at, attempt_number, error_message, delivery status
+
+
+

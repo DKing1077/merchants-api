@@ -1,10 +1,10 @@
 from enum import Enum
+from datetime import datetime
 from pydantic import BaseModel
 
 
 class PaymentIntentStatus(str, Enum):
     requires_payment_method = "requires_payment_method"
-    requires_confirmation = "requires_confirmation"
     requires_capture = "requires_capture"
     succeeded = "succeeded"
     canceled = "canceled"
@@ -25,6 +25,8 @@ class PaymentIntentResponse(BaseModel):
     is_flagged: bool
     review_status: ReviewStatus | None = None
     review_reason: str | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class CreatePaymentIntentRequest(BaseModel):

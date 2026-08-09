@@ -129,3 +129,5 @@ def cancel_payment_intent_route(payment_intent_id, db=Depends(get_db)):
         raise HTTPException(status_code=404, detail=str(exc))
     except InvalidPaymentIntentStateError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
+
+
