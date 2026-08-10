@@ -95,7 +95,6 @@ def confirm_refund(refund_id, db):
     if refund.review_status == "rejected":
         raise RefundStateError(f"Cannot confirm rejected refund {refund_id}")
 
-    refund.status = RefundStatus.confirmed
     payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == refund.payment_intent_id).first()
 
     cash = db.query(LedgerAccount).filter(
@@ -109,18 +108,24 @@ def confirm_refund(refund_id, db):
         LedgerAccount.currency == payment_intent.currency,
     ).first()
 
-    if cash and payable:
-        create_ledger_entry(
-            db=db,
-            entry_type="refund_confirmed",
-            reference_id=refund.id,
-            description=f"Refund confirmed for {refund.id}",
-            entry_metadata={"merchant_id": payment_intent.merchant_id},
-            postings=[
-                {"account_id": payable.id, "amount": refund.amount, "currency": payment_intent.currency},
-                {"account_id": cash.id, "amount": -refund.amount, "currency": payment_intent.currency},
-            ],
+    if not cash or not payable:
+        raise RefundStateError(
+            f"Missing ledger accounts for merchant {payment_intent.merchant_id} and currency {payment_intent.currency}"
         )
+
+    refund.status = RefundStatus.confirmed
+
+    create_ledger_entry(
+        db=db,
+        entry_type="refund_confirmed",
+        reference_id=refund.id,
+        description=f"Refund confirmed for {refund.id}",
+        entry_metadata={"merchant_id": payment_intent.merchant_id},
+        postings=[
+            {"account_id": payable.id, "amount": refund.amount, "currency": payment_intent.currency},
+            {"account_id": cash.id, "amount": -refund.amount, "currency": payment_intent.currency},
+        ],
+    )
 
     event = create_event(
         db=db,
@@ -175,3 +180,4 @@ def cancel_refund(refund_id, db):
     db.commit()
     db.refresh(refund)
     return refund
+

@@ -49,3 +49,5 @@ def get_balance(account_id: str, db: Session = Depends(get_db)):
         return LedgerBalanceResponse(account_id=account_id, balance=balance)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+

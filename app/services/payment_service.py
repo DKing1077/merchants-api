@@ -204,8 +204,6 @@ def capture_payment_intent(db, payment_intent_id):
     if payment_intent.review_status == "rejected":
         raise InvalidPaymentIntentStateError(f"Cannot capture rejected payment intent {payment_intent_id}")
 
-    payment_intent.status = PaymentIntentStatus.succeeded.value
-
     cash = db.query(LedgerAccount).filter(
         LedgerAccount.merchant_id == payment_intent.merchant_id,
         LedgerAccount.account_type == "cash",
@@ -217,18 +215,24 @@ def capture_payment_intent(db, payment_intent_id):
         LedgerAccount.currency == payment_intent.currency,
     ).first()
 
-    if cash and payable:
-        create_ledger_entry(
-            db=db,
-            entry_type="payment_succeeded",
-            reference_id=payment_intent.id,
-            description=f"Payment captured for {payment_intent.id}",
-            entry_metadata={"merchant_id": payment_intent.merchant_id},
-            postings=[
-                {"account_id": cash.id, "amount": payment_intent.amount, "currency": payment_intent.currency},
-                {"account_id": payable.id, "amount": -payment_intent.amount, "currency": payment_intent.currency},
-            ],
+    if not cash or not payable:
+        raise InvalidPaymentIntentStateError(
+            f"Missing ledger accounts for merchant {payment_intent.merchant_id} and currency {payment_intent.currency}"
         )
+
+    payment_intent.status = PaymentIntentStatus.succeeded.value
+
+    create_ledger_entry(
+        db=db,
+        entry_type="payment_succeeded",
+        reference_id=payment_intent.id,
+        description=f"Payment captured for {payment_intent.id}",
+        entry_metadata={"merchant_id": payment_intent.merchant_id},
+        postings=[
+            {"account_id": cash.id, "amount": payment_intent.amount, "currency": payment_intent.currency},
+            {"account_id": payable.id, "amount": -payment_intent.amount, "currency": payment_intent.currency},
+        ],
+    )
 
     event = create_event(
         db=db,
