@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
 set -e
 
-uvicorn app.main:app --reload
+echo "Starting local services..."
+docker compose up --build
