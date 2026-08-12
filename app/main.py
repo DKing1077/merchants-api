@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from app.api.routes import payments
 from app.api.routes import refunds
+from app.api.routes import timestamps
 from app.api.routes import webhooks
 from app.api.routes import ledger
 import app.db.models.models
@@ -39,5 +40,11 @@ app.include_router(
     ledger.router,
     prefix="/v1",
     tags=["ledger"],
+)
+
+app.include_router(
+    timestamps.router,
+    prefix="/v1/timestamps",
+    tags=["timestamps"],
 )
 

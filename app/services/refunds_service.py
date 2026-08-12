@@ -4,6 +4,7 @@ from app.schemas.refunds_schemas import RefundStatus
 from app.services.events import create_event
 from app.services.dispatch import create_dispatches_for_event
 from app.services.ledger_service import create_ledger_entry
+import uuid
 
 
 def list_refunds(db):
@@ -32,6 +33,7 @@ def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None):
         raise RefundStateError("Refund amount should not be greater than payment amount")
 
     refund = Refunds(
+        id=str(uuid.uuid4()),
         payment_intent_id=payment_intent_id,
         amount=refund_amount,
         status=RefundStatus.pending,

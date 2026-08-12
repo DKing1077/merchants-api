@@ -12,8 +12,7 @@ from app.services.refunds_service import (
     review_refund,
     list_flagged_refunds,
 )
-
-router = APIRouter(prefix="/refunds", tags=["refunds"])
+router = APIRouter(tags=["refunds"])
 
 
 @router.get("")

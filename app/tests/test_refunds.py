@@ -45,19 +45,19 @@ def test_get_refund_not_found(db):
 def test_create_refund_zero_amount_raises(db):
     pi = make_payment_intent(db)
     with pytest.raises(RefundStateError, match="greater than 0"):
-        refunds_service.create_refund(pi.id, 0, db)
+        refunds_service.create_refund(db, pi.id, 0)
 
 
 def test_create_refund_negative_amount_raises(db):
     pi = make_payment_intent(db)
     with pytest.raises(RefundStateError, match="greater than 0"):
-        refunds_service.create_refund(pi.id, -100, db)
+        refunds_service.create_refund(db, pi.id, -100)
 
 
 def test_create_refund_exceeds_payment_amount_raises(db):
     pi = make_payment_intent(db, amount=1000)
     with pytest.raises(RefundStateError, match="greater than payment amount"):
-        refunds_service.create_refund(pi.id, 9999, db)
+        refunds_service.create_refund(db, pi.id, 9999)
 
 
 # ---------------------------------------------------------------------------

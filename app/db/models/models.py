@@ -29,7 +29,7 @@ class PaymentIntent(Base):
 class Refunds(Base):
     __tablename__ = "refunds"
 
-    id = Column(String, primary_key=True, index=True, nullable=False, unique=True)
+    id = Column(String, primary_key=True, index=True, nullable=False, unique=True, default=lambda: str(uuid.uuid4()))
     merchant_id = Column(String, nullable=False, index=True)
     payment_intent_id = Column(String, ForeignKey("payment_intents.id"), nullable=False)
     amount = Column(Integer, nullable=False)
@@ -100,12 +100,12 @@ class WebhookDelivery(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-# Represents a ledger account whose balance is derived from postings.
 class LedgerAccount(Base):
     __tablename__ = "ledger_accounts"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     merchant_id = Column(String, nullable=False, index=True)
+    name = Column(String, nullable=False)
     account_type = Column(String, nullable=False)
     currency = Column(String(3), nullable=False)
 

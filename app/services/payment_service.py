@@ -209,16 +209,32 @@ def capture_payment_intent(db, payment_intent_id):
         LedgerAccount.account_type == "cash",
         LedgerAccount.currency == payment_intent.currency,
     ).first()
+
+    if not cash:
+        cash = LedgerAccount(
+            merchant_id=payment_intent.merchant_id,
+            name="Cash",
+            account_type="cash",
+            currency=payment_intent.currency,
+        )
+        db.add(cash)
+        db.flush()
+
     payable = db.query(LedgerAccount).filter(
         LedgerAccount.merchant_id == payment_intent.merchant_id,
         LedgerAccount.account_type == "merchant_payable",
         LedgerAccount.currency == payment_intent.currency,
     ).first()
 
-    if not cash or not payable:
-        raise InvalidPaymentIntentStateError(
-            f"Missing ledger accounts for merchant {payment_intent.merchant_id} and currency {payment_intent.currency}"
+    if not payable:
+        payable = LedgerAccount(
+            merchant_id=payment_intent.merchant_id,
+            name="Merchant Payable",
+            account_type="merchant_payable",
+            currency=payment_intent.currency,
         )
+        db.add(payable)
+        db.flush()
 
     payment_intent.status = PaymentIntentStatus.succeeded.value
 

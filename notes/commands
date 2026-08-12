@@ -29,6 +29,11 @@ docker compose up --build
 # fast api
 http://localhost:8000/docs
 
+# run tests
+docker compose up -d
+docker compose ps
+docker compose exec app python -m pytest -q app/tests
+
 # Root health check
 curl http://127.0.0.1:8000/
 
