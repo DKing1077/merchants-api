@@ -11,7 +11,10 @@ def create_payment_intent(db, amount, currency, merchant_id, idempotency_key=Non
     if idempotency_key:
         existing = (
             db.query(PaymentIntent)
-            .filter(PaymentIntent.idempotency_key == idempotency_key)
+            .filter(
+                PaymentIntent.idempotency_key == idempotency_key,
+                PaymentIntent.merchant_id == merchant_id,
+            )
             .first()
         )
         if existing:
@@ -52,10 +55,13 @@ def create_payment_intent(db, amount, currency, merchant_id, idempotency_key=Non
     return payment_intent
 
 
-def get_payment_intent(db, payment_intent_id):
+def get_payment_intent(db, payment_intent_id, merchant_id):
     payment_intent = (
         db.query(PaymentIntent)
-        .filter(PaymentIntent.id == payment_intent_id)
+        .filter(
+            PaymentIntent.id == payment_intent_id,
+            PaymentIntent.merchant_id == merchant_id,
+        )
         .first()
     )
     if not payment_intent:
@@ -63,12 +69,16 @@ def get_payment_intent(db, payment_intent_id):
     return payment_intent
 
 
-def list_payment_intents(db):
-    return db.query(PaymentIntent).all()
+def list_payment_intents(db, merchant_id):
+    return (
+        db.query(PaymentIntent)
+        .filter(PaymentIntent.merchant_id == merchant_id)
+        .all()
+    )
 
 
-def list_payment_intent_transactions(db, payment_intent_id):
-    payment_intent = get_payment_intent(db, payment_intent_id)
+def list_payment_intent_transactions(db, payment_intent_id, merchant_id):
+    payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
 
     transactions = []
 
@@ -125,22 +135,35 @@ def list_payment_intent_transactions(db, payment_intent_id):
     return transactions
 
 
-def list_transactions(db):
-    payment_intents = db.query(PaymentIntent).all()
+def list_transactions(db, merchant_id):
+    payment_intents = (
+        db.query(PaymentIntent)
+        .filter(PaymentIntent.merchant_id == merchant_id)
+        .all()
+    )
     transactions = []
 
     for payment_intent in payment_intents:
-        transactions.extend(list_payment_intent_transactions(db, payment_intent.id))
+        transactions.extend(
+            list_payment_intent_transactions(db, payment_intent.id, merchant_id)
+        )
 
     return transactions
 
 
-def list_flagged_payment_intents(db):
-    return db.query(PaymentIntent).filter(PaymentIntent.is_flagged == True).all()
+def list_flagged_payment_intents(db, merchant_id):
+    return (
+        db.query(PaymentIntent)
+        .filter(
+            PaymentIntent.merchant_id == merchant_id,
+            PaymentIntent.is_flagged == True,
+        )
+        .all()
+    )
 
 
-def flag_payment_intent(db, payment_intent_id, reason):
-    payment_intent = get_payment_intent(db, payment_intent_id)
+def flag_payment_intent(db, payment_intent_id, reason, merchant_id):
+    payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
     payment_intent.is_flagged = True
     payment_intent.review_status = "pending_review"
     payment_intent.review_reason = reason
@@ -149,8 +172,8 @@ def flag_payment_intent(db, payment_intent_id, reason):
     return payment_intent
 
 
-def review_payment_intent(db, payment_intent_id, review_status):
-    payment_intent = get_payment_intent(db, payment_intent_id)
+def review_payment_intent(db, payment_intent_id, review_status, merchant_id):
+    payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
 
     if not payment_intent.is_flagged:
         raise InvalidPaymentIntentStateError(
@@ -163,8 +186,8 @@ def review_payment_intent(db, payment_intent_id, review_status):
     return payment_intent
 
 
-def confirm_payment_intent(db, payment_intent_id):
-    payment_intent = get_payment_intent(db, payment_intent_id)
+def confirm_payment_intent(db, payment_intent_id, merchant_id):
+    payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
     if payment_intent.status == PaymentIntentStatus.canceled.value:
         raise InvalidPaymentIntentStateError(f"Cannot confirm canceled payment intent {payment_intent_id}")
     if payment_intent.status == PaymentIntentStatus.succeeded.value:
@@ -193,8 +216,8 @@ def confirm_payment_intent(db, payment_intent_id):
     return payment_intent
 
 
-def capture_payment_intent(db, payment_intent_id):
-    payment_intent = get_payment_intent(db, payment_intent_id)
+def capture_payment_intent(db, payment_intent_id, merchant_id):
+    payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
     if payment_intent.status == PaymentIntentStatus.canceled.value:
         raise InvalidPaymentIntentStateError(f"Cannot capture canceled payment intent {payment_intent_id}")
     if payment_intent.status == PaymentIntentStatus.succeeded.value:
@@ -267,8 +290,8 @@ def capture_payment_intent(db, payment_intent_id):
     return payment_intent
 
 
-def cancel_payment_intent(db, payment_intent_id):
-    payment_intent = get_payment_intent(db, payment_intent_id)
+def cancel_payment_intent(db, payment_intent_id, merchant_id):
+    payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
     if payment_intent.status == PaymentIntentStatus.succeeded.value:
         raise InvalidPaymentIntentStateError(f"Cannot cancel succeeded payment intent {payment_intent_id}")
     if payment_intent.status == PaymentIntentStatus.canceled.value:

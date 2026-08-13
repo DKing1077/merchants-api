@@ -8,21 +8,42 @@ from sqlalchemy import func
 import uuid
 
 
-def list_refunds(db):
-    return db.query(Refunds).all()
+def list_refunds(db, merchant_id):
+    return db.query(Refunds).filter(Refunds.merchant_id == merchant_id).all()
 
 
-def list_flagged_refunds(db):
-    return db.query(Refunds).filter(Refunds.is_flagged == True).all()
+def list_flagged_refunds(db, merchant_id):
+    return (
+        db.query(Refunds)
+        .filter(
+            Refunds.merchant_id == merchant_id,
+            Refunds.is_flagged == True,
+        )
+        .all()
+    )
 
 
-def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None):
+def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None, merchant_id=None):
     if idempotency_key:
-        existing = db.query(Refunds).filter(Refunds.idempotency_key == idempotency_key).first()
+        existing = (
+            db.query(Refunds)
+            .filter(
+                Refunds.idempotency_key == idempotency_key,
+                Refunds.merchant_id == merchant_id,
+            )
+            .first()
+        )
         if existing:
             return existing
 
-    payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == payment_intent_id).first()
+    payment_intent = (
+        db.query(PaymentIntent)
+        .filter(
+            PaymentIntent.id == payment_intent_id,
+            PaymentIntent.merchant_id == merchant_id,
+        )
+        .first()
+    )
     if not payment_intent:
         raise PaymentIntentNotFoundError(
             f"Payment intent with id {payment_intent_id} not found"
@@ -33,8 +54,11 @@ def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None):
 
     existing_refunded = (
         db.query(func.coalesce(func.sum(Refunds.amount), 0))
-        .filter(Refunds.payment_intent_id == payment_intent_id)
-        .filter(Refunds.status != RefundStatus.cancelled)
+        .filter(
+            Refunds.payment_intent_id == payment_intent_id,
+            Refunds.merchant_id == merchant_id,
+            Refunds.status != RefundStatus.canceled,
+        )
         .scalar()
     )
 
@@ -72,15 +96,22 @@ def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None):
     return refund
 
 
-def get_refund(refund_id, db):
-    refund = db.query(Refunds).filter(Refunds.id == refund_id).first()
+def get_refund(refund_id, db, merchant_id):
+    refund = (
+        db.query(Refunds)
+        .filter(
+            Refunds.id == refund_id,
+            Refunds.merchant_id == merchant_id,
+        )
+        .first()
+    )
     if not refund:
         raise RefundNotFoundError(f"Refund {refund_id} not found")
     return refund
 
 
-def flag_refund(db, refund_id, reason):
-    refund = get_refund(refund_id, db)
+def flag_refund(db, refund_id, reason, merchant_id):
+    refund = get_refund(refund_id, db, merchant_id)
     refund.is_flagged = True
     refund.review_status = "pending_review"
     refund.review_reason = reason
@@ -89,8 +120,8 @@ def flag_refund(db, refund_id, reason):
     return refund
 
 
-def review_refund(db, refund_id, review_status):
-    refund = get_refund(refund_id, db)
+def review_refund(db, refund_id, review_status, merchant_id):
+    refund = get_refund(refund_id, db, merchant_id)
     if not refund.is_flagged:
         raise RefundStateError(f"Refund {refund_id} is not flagged for review")
     refund.review_status = review_status
@@ -99,14 +130,21 @@ def review_refund(db, refund_id, review_status):
     return refund
 
 
-def confirm_refund(refund_id, db):
-    refund = get_refund(refund_id, db)
+def confirm_refund(refund_id, db, merchant_id):
+    refund = get_refund(refund_id, db, merchant_id)
     if refund.status != RefundStatus.pending:
         raise RefundStateError(f"Refund {refund_id} is not in a pending state")
     if refund.review_status == "rejected":
         raise RefundStateError(f"Cannot confirm rejected refund {refund_id}")
 
-    payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == refund.payment_intent_id).first()
+    payment_intent = (
+        db.query(PaymentIntent)
+        .filter(
+            PaymentIntent.id == refund.payment_intent_id,
+            PaymentIntent.merchant_id == merchant_id,
+        )
+        .first()
+    )
     if not payment_intent:
         raise PaymentIntentNotFoundError(
             f"Payment intent with id {refund.payment_intent_id} not found"
@@ -157,13 +195,20 @@ def confirm_refund(refund_id, db):
     return refund
 
 
-def decline_refund(refund_id, db):
-    refund = get_refund(refund_id, db)
+def decline_refund(refund_id, db, merchant_id):
+    refund = get_refund(refund_id, db, merchant_id)
     if refund.status != RefundStatus.pending:
         raise RefundStateError(f"Refund {refund_id} is not in a pending state")
 
     refund.status = RefundStatus.declined
-    payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == refund.payment_intent_id).first()
+    payment_intent = (
+        db.query(PaymentIntent)
+        .filter(
+            PaymentIntent.id == refund.payment_intent_id,
+            PaymentIntent.merchant_id == merchant_id,
+        )
+        .first()
+    )
 
     event = create_event(
         db=db,
@@ -178,13 +223,20 @@ def decline_refund(refund_id, db):
     return refund
 
 
-def cancel_refund(refund_id, db):
-    refund = get_refund(refund_id, db)
+def cancel_refund(refund_id, db, merchant_id):
+    refund = get_refund(refund_id, db, merchant_id)
     if refund.status != RefundStatus.pending:
         raise RefundStateError(f"Refund {refund_id} is not in a pending state")
 
     refund.status = RefundStatus.canceled
-    payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == refund.payment_intent_id).first()
+    payment_intent = (
+        db.query(PaymentIntent)
+        .filter(
+            PaymentIntent.id == refund.payment_intent_id,
+            PaymentIntent.merchant_id == merchant_id,
+        )
+        .first()
+    )
 
     event = create_event(
         db=db,
@@ -197,4 +249,3 @@ def cancel_refund(refund_id, db):
     db.commit()
     db.refresh(refund)
     return refund
-
