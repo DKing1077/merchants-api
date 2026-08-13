@@ -4,6 +4,7 @@ from app.db.models.models import PaymentIntent, LedgerAccount
 from app.services.events import create_event
 from app.services.dispatch import create_dispatches_for_event
 from app.services.ledger_service import create_ledger_entry
+import uuid
 
 
 def create_payment_intent(db, amount, currency, merchant_id, idempotency_key=None):
@@ -16,8 +17,7 @@ def create_payment_intent(db, amount, currency, merchant_id, idempotency_key=Non
         if existing:
             return existing
 
-    payment_intent_count = db.query(PaymentIntent).count()
-    payment_intent_id = f"pi_{payment_intent_count + 1}"
+    payment_intent_id = f"pi_{uuid.uuid4()}"
 
     payment_intent = PaymentIntent(
         id=payment_intent_id,

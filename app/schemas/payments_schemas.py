@@ -1,6 +1,6 @@
 from enum import Enum
 from datetime import datetime
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class PaymentIntentStatus(str, Enum):
@@ -31,8 +31,8 @@ class PaymentIntentResponse(BaseModel):
 
 class CreatePaymentIntentRequest(BaseModel):
     merchant_id: str
-    amount: int
-    currency: str
+    amount: int = Field(..., gt=0)
+    currency: str = Field(..., min_length=3, max_length=3)
 
 
 class FlagPaymentIntentRequest(BaseModel):

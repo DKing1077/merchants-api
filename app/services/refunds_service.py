@@ -1,9 +1,10 @@
 from app.db.models.models import Refunds, PaymentIntent, LedgerAccount
-from app.core.exceptions import RefundStateError, RefundNotFoundError
+from app.core.exceptions import RefundStateError, RefundNotFoundError, PaymentIntentNotFoundError
 from app.schemas.refunds_schemas import RefundStatus
 from app.services.events import create_event
 from app.services.dispatch import create_dispatches_for_event
 from app.services.ledger_service import create_ledger_entry
+from sqlalchemy import func
 import uuid
 
 
@@ -23,14 +24,22 @@ def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None):
 
     payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == payment_intent_id).first()
     if not payment_intent:
-        raise RefundNotFoundError(
-            f"Refund intent with payment_intent_id {payment_intent_id} not found"
+        raise PaymentIntentNotFoundError(
+            f"Payment intent with id {payment_intent_id} not found"
         )
 
     if refund_amount <= 0:
         raise RefundStateError("Refund amount has to be greater than 0")
-    if refund_amount > payment_intent.amount:
-        raise RefundStateError("Refund amount should not be greater than payment amount")
+
+    existing_refunded = (
+        db.query(func.coalesce(func.sum(Refunds.amount), 0))
+        .filter(Refunds.payment_intent_id == payment_intent_id)
+        .filter(Refunds.status != RefundStatus.cancelled)
+        .scalar()
+    )
+
+    if existing_refunded + refund_amount > payment_intent.amount:
+        raise RefundStateError("Refund amount exceeds remaining refundable payment amount")
 
     refund = Refunds(
         id=str(uuid.uuid4()),
@@ -98,6 +107,12 @@ def confirm_refund(refund_id, db):
         raise RefundStateError(f"Cannot confirm rejected refund {refund_id}")
 
     payment_intent = db.query(PaymentIntent).filter(PaymentIntent.id == refund.payment_intent_id).first()
+    if not payment_intent:
+        raise PaymentIntentNotFoundError(
+            f"Payment intent with id {refund.payment_intent_id} not found"
+        )
+    if payment_intent.status != "succeeded":
+        raise RefundStateError("Refund can only be confirmed for succeeded payment intents")
 
     cash = db.query(LedgerAccount).filter(
         LedgerAccount.merchant_id == payment_intent.merchant_id,

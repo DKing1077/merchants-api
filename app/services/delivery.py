@@ -1,5 +1,5 @@
 from app.db.models import WebhookDispatch, WebhookEndpoint, WebhookDelivery
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import json
@@ -15,8 +15,10 @@ def process_pending_dispatches(db):
 
         try:
             payload_json = json.dumps(dispatch.payload, separators=(",", ":"), sort_keys=True)
+
+            key = bytes.fromhex(endpoint.secret)
             signature = hmac.new(
-                endpoint.secret.encode(),
+                key,
                 payload_json.encode(),
                 hashlib.sha256,
             ).hexdigest()
@@ -38,8 +40,8 @@ def process_pending_dispatches(db):
                 response_status=response.status_code,
                 response_body=response.text,
                 status="success" if success else "failed",
-                delivered_at=datetime.utcnow() if success else None,
-                next_retry_at=None if success or attempts >= 3 else datetime.utcnow() + timedelta(minutes=5),
+                delivered_at=datetime.now(timezone.utc) if success else None,
+                next_retry_at=None if success or attempts >= 3 else datetime.now(timezone.utc) + timedelta(minutes=5),
             ))
 
             dispatch.status = "success" if success else ("failed" if attempts >= 3 else "pending")
@@ -50,7 +52,7 @@ def process_pending_dispatches(db):
                 attempt_number=attempts,
                 error_message=str(exc),
                 status="failed",
-                next_retry_at=None if attempts >= 3 else datetime.utcnow() + timedelta(minutes=5),
+                next_retry_at=None if attempts >= 3 else datetime.now(timezone.utc) + timedelta(minutes=5),
             ))
             dispatch.status = "failed" if attempts >= 3 else "pending"
 
