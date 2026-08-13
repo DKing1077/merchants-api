@@ -1,6 +1,6 @@
 from enum import Enum
 from datetime import datetime
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class PaymentIntentStatus(str, Enum):
@@ -33,6 +33,20 @@ class CreatePaymentIntentRequest(BaseModel):
     merchant_id: str
     amount: int = Field(..., gt=0)
     currency: str = Field(..., min_length=3, max_length=3)
+
+    @field_validator("merchant_id")
+    @classmethod
+    def validate_merchant_id(cls, value):
+        if not value or not value.strip():
+            raise ValueError("merchant_id must not be blank")
+        return value
+
+    @field_validator("currency")
+    @classmethod
+    def validate_currency(cls, value):
+        if not value.isalpha() or value != value.upper() or len(value) != 3:
+            raise ValueError("currency must be exactly 3 uppercase letters")
+        return value
 
 
 class FlagPaymentIntentRequest(BaseModel):

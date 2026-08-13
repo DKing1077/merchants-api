@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Header, HTTPException
+from app.auth.dependencies import require_api_key
 from app.db.database import get_db
 from app.core.exceptions import (
     InvalidPaymentIntentStateError,
@@ -38,6 +39,7 @@ def create_payment_intent_route(
     request: CreatePaymentIntentRequest,
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
     db=Depends(get_db),
+    api_key=Depends(require_api_key),
 ):
     try:
         return create_payment_intent(

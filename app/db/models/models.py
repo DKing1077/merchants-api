@@ -1,7 +1,7 @@
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import Column, DateTime, String, Text, Boolean
 from sqlalchemy import Integer, ForeignKey, func
-from datetime import datetime
+from datetime import datetime, timezone
 from app.db.database import Base
 import uuid
 
@@ -136,3 +136,15 @@ class LedgerPosting(Base):
     currency = Column(String(3), nullable=False)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+# Represents an API key for a merchant, used for authenticating requests to the API.
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    key_hash = Column(String, nullable=False, unique=True, index=True)
+    merchant_id = Column(String, nullable=False, index=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+

@@ -4,6 +4,7 @@ from app.api.routes import refunds
 from app.api.routes import timestamps
 from app.api.routes import webhooks
 from app.api.routes import ledger
+from app.api.routes import api_keys
 import app.db.models.models
 from app.core.config import settings
 from app.db.database import create_database_if_missing, Base, engine
@@ -46,5 +47,11 @@ app.include_router(
     timestamps.router,
     prefix="/v1/timestamps",
     tags=["timestamps"],
+)
+
+app.include_router(
+    api_keys.router,
+    prefix="/v1/api_keys",
+    tags=["api_keys"],
 )
 

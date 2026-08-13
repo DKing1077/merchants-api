@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Header
 from app.db.database import get_db
+from app.auth.dependencies import require_api_key
+from app.schemas.refunds_schemas import CreateRefundRequest
 from app.core.exceptions import RefundNotFoundError, RefundStateError
 from app.services.refunds_service import (
     confirm_refund,
@@ -28,11 +30,12 @@ def list_flagged_refunds_route(db=Depends(get_db)):
 @router.post("/payment_intents/{payment_intent_id}/refunds")
 def create_refund_route(
     payment_intent_id: str,
-    amount: int,
+    body: CreateRefundRequest,
     db=Depends(get_db),
+    api_key=Depends(require_api_key),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    return create_refund(db, payment_intent_id, amount, idempotency_key)
+    return create_refund(db, payment_intent_id, body.amount, idempotency_key)
 
 
 @router.get("/{refund_id}")
