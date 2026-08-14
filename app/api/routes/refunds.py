@@ -22,6 +22,8 @@ router = APIRouter(tags=["refunds"])
 def list_refunds_route(
     limit: int = Query(default=20, ge=1, le=100),
     starting_after: str | None = Query(default=None),
+    payment_intent_id: str | None = Query(default=None),
+    status: str | None = Query(default=None),
     db=Depends(get_db),
     api_key=Depends(require_api_key),
 ):
@@ -30,6 +32,8 @@ def list_refunds_route(
         merchant_id=api_key.merchant_id,
         limit=limit,
         starting_after=starting_after,
+        payment_intent_id=payment_intent_id,
+        status=status,
     )
 
 

@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from app.auth.dependencies import require_api_key, require_admin_api_key
 from app.db.database import get_db
@@ -33,14 +35,28 @@ router = APIRouter()
 def list_payment_intents_route(
     limit: int = Query(default=20, ge=1, le=100),
     starting_after: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    created_after: datetime | None = Query(default=None),
+    created_before: datetime | None = Query(default=None),
+    currency: str | None = Query(default=None),
     db=Depends(get_db),
     api_key=Depends(require_api_key),
 ):
+    if created_after and created_before and created_after > created_before:
+        raise HTTPException(
+            status_code=400,
+            detail="created_after must be less than or equal to created_before",
+        )
+
     return list_payment_intents(
         db=db,
         merchant_id=api_key.merchant_id,
         limit=limit,
         starting_after=starting_after,
+        status=status,
+        created_after=created_after,
+        created_before=created_before,
+        currency=currency.lower() if currency else None,
     )
 
 

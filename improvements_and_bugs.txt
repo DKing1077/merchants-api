@@ -119,6 +119,7 @@ C1. All list endpoints (GET /v1/payment_intents, GET /v1/refunds, etc.)
     - Response envelope: {"data": [...], "has_more": bool}
     This pattern mirrors Stripe's own API and is expected knowledge.
 
+* you are here *
 C2. Add filtering query params to the payment intents list:
     - status (e.g. ?status=requires_capture)
     - created_after / created_before (ISO-8601 timestamps)
