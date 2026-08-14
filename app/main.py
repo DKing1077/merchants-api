@@ -10,7 +10,6 @@ from app.core.config import settings
 from app.db.database import create_database_if_missing, Base, engine
 
 create_database_if_missing()
-Base.metadata.create_all(bind=engine)
 app = FastAPI(title=settings.app_name)
 
 

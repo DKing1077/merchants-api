@@ -8,19 +8,70 @@ from sqlalchemy import func
 import uuid
 
 
-def list_refunds(db, merchant_id):
-    return db.query(Refunds).filter(Refunds.merchant_id == merchant_id).all()
+def list_refunds(db, merchant_id, limit=20, starting_after=None):
+    query = (
+        db.query(Refunds)
+        .filter(Refunds.merchant_id == merchant_id)
+        .order_by(Refunds.created_at.desc(), Refunds.id.desc())
+    )
+
+    if starting_after:
+        cursor = (
+            db.query(Refunds)
+            .filter(
+                Refunds.id == starting_after,
+                Refunds.merchant_id == merchant_id,
+            )
+            .first()
+        )
+        if cursor:
+            query = query.filter(
+                (Refunds.created_at < cursor.created_at)
+                | ((Refunds.created_at == cursor.created_at) & (Refunds.id < cursor.id))
+            )
+
+    rows = query.limit(limit + 1).all()
+    has_more = len(rows) > limit
+
+    return {
+        "data": rows[:limit],
+        "has_more": has_more,
+    }
 
 
-def list_flagged_refunds(db, merchant_id):
-    return (
+def list_flagged_refunds(db, merchant_id, limit=20, starting_after=None):
+    query = (
         db.query(Refunds)
         .filter(
             Refunds.merchant_id == merchant_id,
             Refunds.is_flagged == True,
         )
-        .all()
+        .order_by(Refunds.created_at.desc(), Refunds.id.desc())
     )
+
+    if starting_after:
+        cursor = (
+            db.query(Refunds)
+            .filter(
+                Refunds.id == starting_after,
+                Refunds.merchant_id == merchant_id,
+                Refunds.is_flagged == True,
+            )
+            .first()
+        )
+        if cursor:
+            query = query.filter(
+                (Refunds.created_at < cursor.created_at)
+                | ((Refunds.created_at == cursor.created_at) & (Refunds.id < cursor.id))
+            )
+
+    rows = query.limit(limit + 1).all()
+    has_more = len(rows) > limit
+
+    return {
+        "data": rows[:limit],
+        "has_more": has_more,
+    }
 
 
 def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None, merchant_id=None):

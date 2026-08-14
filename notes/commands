@@ -2,13 +2,30 @@
 # Setup
 # =========================================================
 
+# rebuild
+docker compose down -v
+docker compose up -d --build
+docker compose logs -f app # see albemic migration
+
 # Install Alembic
 pip install alembic
 alembic init alembic
 
-# Generate and apply migrations
-alembic revision --autogenerate -m "initial schema"
+# run migrations from scratch
+docker compose exec app alembic upgrade head
+
+# Generate and apply migrations on host
+alembic revision --autogenerate -m "auto update schema"
 alembic upgrade head
+
+# in container
+docker compose up -d
+docker compose exec app python -m alembic revision --autogenerate -m "auto update schema"
+docker compose exec app python -m alembic upgrade head
+
+# future changes
+docker compose exec app alembic revision --autogenerate -m "auto update schema"
+docker compose exec app alembic upgrade head
 
 # In alembic/env.py, make sure database URL is loaded from settings
 # config.set_main_option("sqlalchemy.url", settings.database_url)

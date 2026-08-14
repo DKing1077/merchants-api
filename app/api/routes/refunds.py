@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from app.db.database import get_db
-from app.auth.dependencies import require_api_key
+from app.auth.dependencies import require_api_key, require_admin_api_key
 from app.schemas.refunds_schemas import CreateRefundRequest
 from app.core.exceptions import RefundNotFoundError, RefundStateError
 from app.services.refunds_service import (
@@ -20,18 +20,32 @@ router = APIRouter(tags=["refunds"])
 
 @router.get("")
 def list_refunds_route(
+    limit: int = Query(default=20, ge=1, le=100),
+    starting_after: str | None = Query(default=None),
     db=Depends(get_db),
     api_key=Depends(require_api_key),
 ):
-    return list_refunds(db, api_key.merchant_id)
+    return list_refunds(
+        db=db,
+        merchant_id=api_key.merchant_id,
+        limit=limit,
+        starting_after=starting_after,
+    )
 
 
 @router.get("/admin/flagged")
 def list_flagged_refunds_route(
+    limit: int = Query(default=20, ge=1, le=100),
+    starting_after: str | None = Query(default=None),
     db=Depends(get_db),
-    api_key=Depends(require_api_key),
+    api_key=Depends(require_admin_api_key),
 ):
-    return list_flagged_refunds(db, api_key.merchant_id)
+    return list_flagged_refunds(
+        db=db,
+        merchant_id=api_key.merchant_id,
+        limit=limit,
+        starting_after=starting_after,
+    )
 
 
 @router.post("/payment_intents/{payment_intent_id}/refunds")
@@ -58,10 +72,7 @@ def get_refund_route(
     api_key=Depends(require_api_key),
 ):
     try:
-        refund = get_refund(refund_id, db)
-        if refund.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Refund not found")
-        return refund
+        return get_refund(refund_id, db, api_key.merchant_id)
     except RefundNotFoundError:
         raise HTTPException(status_code=404, detail="Refund not found")
 
@@ -74,10 +85,7 @@ def flag_refund_route(
     api_key=Depends(require_api_key),
 ):
     try:
-        refund = get_refund(refund_id, db)
-        if refund.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Refund not found")
-        return flag_refund(db, refund_id, reason)
+        return flag_refund(db, refund_id, reason, api_key.merchant_id)
     except RefundNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -87,13 +95,10 @@ def review_refund_route(
     refund_id: str,
     review_status: str,
     db=Depends(get_db),
-    api_key=Depends(require_api_key),
+    api_key=Depends(require_admin_api_key),
 ):
     try:
-        refund = get_refund(refund_id, db)
-        if refund.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Refund not found")
-        return review_refund(db, refund_id, review_status)
+        return review_refund(db, refund_id, review_status, api_key.merchant_id)
     except RefundNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except RefundStateError as exc:
@@ -107,10 +112,7 @@ def confirm_refund_route(
     api_key=Depends(require_api_key),
 ):
     try:
-        refund = get_refund(refund_id, db)
-        if refund.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Refund not found")
-        return confirm_refund(refund_id, db)
+        return confirm_refund(refund_id, db, api_key.merchant_id)
     except RefundNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except RefundStateError as exc:
@@ -124,10 +126,7 @@ def decline_refund_route(
     api_key=Depends(require_api_key),
 ):
     try:
-        refund = get_refund(refund_id, db)
-        if refund.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Refund not found")
-        return decline_refund(refund_id, db)
+        return decline_refund(refund_id, db, api_key.merchant_id)
     except RefundNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except RefundStateError as exc:
@@ -141,10 +140,7 @@ def cancel_refund_route(
     api_key=Depends(require_api_key),
 ):
     try:
-        refund = get_refund(refund_id, db)
-        if refund.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Refund not found")
-        return cancel_refund(refund_id, db)
+        return cancel_refund(refund_id, db, api_key.merchant_id)
     except RefundNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except RefundStateError as exc:

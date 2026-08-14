@@ -69,15 +69,43 @@ def get_payment_intent(db, payment_intent_id, merchant_id):
     return payment_intent
 
 
-def list_payment_intents(db, merchant_id):
-    return (
+def list_payment_intents(db, merchant_id, limit=20, starting_after=None):
+    query = (
         db.query(PaymentIntent)
         .filter(PaymentIntent.merchant_id == merchant_id)
-        .all()
+        .order_by(PaymentIntent.created_at.desc(), PaymentIntent.id.desc())
     )
 
+    if starting_after:
+        cursor = (
+            db.query(PaymentIntent)
+            .filter(
+                PaymentIntent.id == starting_after,
+                PaymentIntent.merchant_id == merchant_id,
+            )
+            .first()
+        )
+        if cursor:
+            query = query.filter(
+                (PaymentIntent.created_at < cursor.created_at)
+                | (
+                    (PaymentIntent.created_at == cursor.created_at)
+                    & (PaymentIntent.id < cursor.id)
+                )
+            )
 
-def list_payment_intent_transactions(db, payment_intent_id, merchant_id):
+    rows = query.limit(limit + 1).all()
+    has_more = len(rows) > limit
+
+    return {
+        "data": rows[:limit],
+        "has_more": has_more,
+    }
+
+
+def list_payment_intent_transactions(
+    db, payment_intent_id, merchant_id, limit=20, starting_after=None
+):
     payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
 
     transactions = []
@@ -132,34 +160,96 @@ def list_payment_intent_transactions(db, payment_intent_id, merchant_id):
             }
         )
 
-    return transactions
+    if starting_after:
+        start_index = next(
+            (index for index, txn in enumerate(transactions) if txn["id"] == starting_after),
+            None,
+        )
+        if start_index is not None:
+            transactions = transactions[start_index + 1 :]
+
+    sliced = transactions[: limit + 1]
+    has_more = len(sliced) > limit
+
+    return {
+        "data": sliced[:limit],
+        "has_more": has_more,
+    }
 
 
-def list_transactions(db, merchant_id):
+def list_transactions(db, merchant_id, limit=20, starting_after=None):
     payment_intents = (
         db.query(PaymentIntent)
         .filter(PaymentIntent.merchant_id == merchant_id)
+        .order_by(PaymentIntent.created_at.desc(), PaymentIntent.id.desc())
         .all()
     )
     transactions = []
 
     for payment_intent in payment_intents:
         transactions.extend(
-            list_payment_intent_transactions(db, payment_intent.id, merchant_id)
+            list_payment_intent_transactions(
+                db=db,
+                payment_intent_id=payment_intent.id,
+                merchant_id=merchant_id,
+                limit=1000000,
+                starting_after=None,
+            )["data"]
         )
 
-    return transactions
+    if starting_after:
+        start_index = next(
+            (index for index, txn in enumerate(transactions) if txn["id"] == starting_after),
+            None,
+        )
+        if start_index is not None:
+            transactions = transactions[start_index + 1 :]
+
+    sliced = transactions[: limit + 1]
+    has_more = len(sliced) > limit
+
+    return {
+        "data": sliced[:limit],
+        "has_more": has_more,
+    }
 
 
-def list_flagged_payment_intents(db, merchant_id):
-    return (
+def list_flagged_payment_intents(db, merchant_id, limit=20, starting_after=None):
+    query = (
         db.query(PaymentIntent)
         .filter(
             PaymentIntent.merchant_id == merchant_id,
             PaymentIntent.is_flagged == True,
         )
-        .all()
+        .order_by(PaymentIntent.created_at.desc(), PaymentIntent.id.desc())
     )
+
+    if starting_after:
+        cursor = (
+            db.query(PaymentIntent)
+            .filter(
+                PaymentIntent.id == starting_after,
+                PaymentIntent.merchant_id == merchant_id,
+                PaymentIntent.is_flagged == True,
+            )
+            .first()
+        )
+        if cursor:
+            query = query.filter(
+                (PaymentIntent.created_at < cursor.created_at)
+                | (
+                    (PaymentIntent.created_at == cursor.created_at)
+                    & (PaymentIntent.id < cursor.id)
+                )
+            )
+
+    rows = query.limit(limit + 1).all()
+    has_more = len(rows) > limit
+
+    return {
+        "data": rows[:limit],
+        "has_more": has_more,
+    }
 
 
 def flag_payment_intent(db, payment_intent_id, reason, merchant_id):

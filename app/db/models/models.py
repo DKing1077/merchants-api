@@ -146,5 +146,6 @@ class ApiKey(Base):
     key_hash = Column(String, nullable=False, unique=True, index=True)
     merchant_id = Column(String, nullable=False, index=True)
     is_active = Column(Boolean, default=True, nullable=False)
+    is_admin = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 

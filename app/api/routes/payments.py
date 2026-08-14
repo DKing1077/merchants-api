@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, Header, HTTPException
-from app.auth.dependencies import require_api_key
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from app.auth.dependencies import require_api_key, require_admin_api_key
 from app.db.database import get_db
 from app.core.exceptions import (
     InvalidPaymentIntentStateError,
@@ -31,10 +31,17 @@ router = APIRouter()
 
 @router.get("/")
 def list_payment_intents_route(
+    limit: int = Query(default=20, ge=1, le=100),
+    starting_after: str | None = Query(default=None),
     db=Depends(get_db),
     api_key=Depends(require_api_key),
 ):
-    return {"payment_intents": list_payment_intents(db, api_key.merchant_id)}
+    return list_payment_intents(
+        db=db,
+        merchant_id=api_key.merchant_id,
+        limit=limit,
+        starting_after=starting_after,
+    )
 
 
 @router.post("", response_model=PaymentIntentResponse, status_code=201)
@@ -61,63 +68,80 @@ def create_payment_intent_route(
 
 @router.get("/admin/flagged")
 def list_flagged_payment_intents_route(
+    limit: int = Query(default=20, ge=1, le=100),
+    starting_after: str | None = Query(default=None),
     db=Depends(get_db),
-    api_key=Depends(require_api_key),
+    api_key=Depends(require_admin_api_key),
 ):
-    return {"payment_intents": list_flagged_payment_intents(db)}
+    return list_flagged_payment_intents(
+        db=db,
+        merchant_id=api_key.merchant_id,
+        limit=limit,
+        starting_after=starting_after,
+    )
 
 
 @router.get("/transactions")
 def list_transactions_route(
+    limit: int = Query(default=20, ge=1, le=100),
+    starting_after: str | None = Query(default=None),
     db=Depends(get_db),
     api_key=Depends(require_api_key),
 ):
-    return {"transactions": list_transactions(db, api_key.merchant_id)}
+    return list_transactions(
+        db=db,
+        merchant_id=api_key.merchant_id,
+        limit=limit,
+        starting_after=starting_after,
+    )
 
 
 @router.get("/{payment_intent_id}/transactions")
 def list_payment_intent_transactions_route(
-    payment_intent_id,
+    payment_intent_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+    starting_after: str | None = Query(default=None),
     db=Depends(get_db),
     api_key=Depends(require_api_key),
 ):
     try:
-        return {
-            "transactions": list_payment_intent_transactions(
-                db, payment_intent_id, api_key.merchant_id
-            )
-        }
+        return list_payment_intent_transactions(
+            db=db,
+            payment_intent_id=payment_intent_id,
+            merchant_id=api_key.merchant_id,
+            limit=limit,
+            starting_after=starting_after,
+        )
     except PaymentIntentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
 @router.get("/{payment_intent_id}", response_model=PaymentIntentResponse)
 def get_payment_intent_route(
-    payment_intent_id,
+    payment_intent_id: str,
     db=Depends(get_db),
     api_key=Depends(require_api_key),
 ):
     try:
-        payment_intent = get_payment_intent(db, payment_intent_id)
-        if payment_intent.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Payment intent not found")
-        return payment_intent
+        return get_payment_intent(db, payment_intent_id, api_key.merchant_id)
     except PaymentIntentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
 
-@router.post("/{payment_intent_id}/flag", response_model=PaymentIntentResponse)
+@router.post("/admin/{payment_intent_id}/flag", response_model=PaymentIntentResponse)
 def flag_payment_intent_route(
-    payment_intent_id,
+    payment_intent_id: str,
     request: FlagPaymentIntentRequest,
     db=Depends(get_db),
-    api_key=Depends(require_api_key),
+    api_key=Depends(require_admin_api_key),
 ):
     try:
-        payment_intent = get_payment_intent(db, payment_intent_id)
-        if payment_intent.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Payment intent not found")
-        return flag_payment_intent(db, payment_intent_id, request.reason)
+        return flag_payment_intent(
+            db,
+            payment_intent_id,
+            request.reason,
+            api_key.merchant_id,
+        )
     except PaymentIntentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except InvalidPaymentIntentStateError as exc:
@@ -126,13 +150,18 @@ def flag_payment_intent_route(
 
 @router.post("/admin/{payment_intent_id}/review", response_model=PaymentIntentResponse)
 def review_payment_intent_route(
-    payment_intent_id,
+    payment_intent_id: str,
     request: ReviewPaymentIntentRequest,
     db=Depends(get_db),
-    api_key=Depends(require_api_key),
+    api_key=Depends(require_admin_api_key),
 ):
     try:
-        return review_payment_intent(db, payment_intent_id, request.review_status.value)
+        return review_payment_intent(
+            db,
+            payment_intent_id,
+            request.review_status.value,
+            api_key.merchant_id,
+        )
     except PaymentIntentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except InvalidPaymentIntentStateError as exc:
@@ -141,15 +170,12 @@ def review_payment_intent_route(
 
 @router.post("/{payment_intent_id}/confirm", response_model=PaymentIntentResponse)
 def confirm_payment_intent_route(
-    payment_intent_id,
+    payment_intent_id: str,
     db=Depends(get_db),
     api_key=Depends(require_api_key),
 ):
     try:
-        payment_intent = get_payment_intent(db, payment_intent_id)
-        if payment_intent.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Payment intent not found")
-        return confirm_payment_intent(db, payment_intent_id)
+        return confirm_payment_intent(db, payment_intent_id, api_key.merchant_id)
     except PaymentIntentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except InvalidPaymentIntentStateError as exc:
@@ -158,15 +184,12 @@ def confirm_payment_intent_route(
 
 @router.post("/{payment_intent_id}/capture", response_model=PaymentIntentResponse)
 def capture_payment_intent_route(
-    payment_intent_id,
+    payment_intent_id: str,
     db=Depends(get_db),
     api_key=Depends(require_api_key),
 ):
     try:
-        payment_intent = get_payment_intent(db, payment_intent_id)
-        if payment_intent.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Payment intent not found")
-        return capture_payment_intent(db, payment_intent_id)
+        return capture_payment_intent(db, payment_intent_id, api_key.merchant_id)
     except PaymentIntentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except InvalidPaymentIntentStateError as exc:
@@ -175,15 +198,12 @@ def capture_payment_intent_route(
 
 @router.post("/{payment_intent_id}/cancel", response_model=PaymentIntentResponse)
 def cancel_payment_intent_route(
-    payment_intent_id,
+    payment_intent_id: str,
     db=Depends(get_db),
     api_key=Depends(require_api_key),
 ):
     try:
-        payment_intent = get_payment_intent(db, payment_intent_id)
-        if payment_intent.merchant_id != api_key.merchant_id:
-            raise HTTPException(status_code=404, detail="Payment intent not found")
-        return cancel_payment_intent(db, payment_intent_id)
+        return cancel_payment_intent(db, payment_intent_id, api_key.merchant_id)
     except PaymentIntentNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     except InvalidPaymentIntentStateError as exc:

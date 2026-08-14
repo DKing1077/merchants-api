@@ -24,3 +24,11 @@ def require_api_key(
 
     return api_key
 
+
+def require_admin_api_key(
+    api_key: ApiKey = Depends(require_api_key),
+):
+    if not api_key.is_admin:
+        raise HTTPException(status_code=403, detail="admin access required")
+    return api_key
+
