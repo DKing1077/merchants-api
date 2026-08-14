@@ -1,25 +1,26 @@
+import hashlib
 import os
+import uuid
 
 _TEST_DATABASE_URL = "sqlite:///:memory:"
 os.environ.setdefault("DATABASE_URL", _TEST_DATABASE_URL)
 
-# SQLite does not support JSONB; swap it for generic JSON before any model imports.
-from sqlalchemy import JSON
+from sqlalchemy import JSON, create_engine
 import sqlalchemy.dialects.postgresql as _pg_dialect
+
 _pg_dialect.JSONB = JSON  # type: ignore[attr-defined]
 
 import pytest
-from sqlalchemy import create_engine
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
-from fastapi.testclient import TestClient
 
-# Patch out the PostgreSQL-only helper before the app is imported.
 import app.db.database as _db_module
 
 _db_module.create_database_if_missing = lambda: None
 
 from app.db.database import Base, get_db
+from app.db.models import ApiKey
 from app.main import app
 
 engine = create_engine(
@@ -50,8 +51,36 @@ def reset_db():
 
 
 @pytest.fixture
-def client():
-    return TestClient(app)
+def auth_headers() -> dict[str, str]:
+    return {"Authorization": "test-key"}
+
+
+@pytest.fixture
+def admin_headers() -> dict[str, str]:
+    return {"Authorization": "admin-key"}
+
+
+@pytest.fixture
+def client(auth_headers, admin_headers):
+    db = TestingSessionLocal()
+    try:
+        for raw_key, is_admin in ((auth_headers["Authorization"], False), (admin_headers["Authorization"], True)):
+            db.add(
+                ApiKey(
+                    id=str(uuid.uuid4()),
+                    key_hash=hashlib.sha256(raw_key.encode()).hexdigest(),
+                    merchant_id="merchant_1",
+                    is_active=True,
+                    is_admin=is_admin,
+                )
+            )
+        db.commit()
+    finally:
+        db.close()
+
+    test_client = TestClient(app)
+    test_client.headers.update(auth_headers)
+    return test_client
 
 
 @pytest.fixture

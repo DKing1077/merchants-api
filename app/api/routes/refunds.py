@@ -1,18 +1,19 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+
+from app.auth.dependencies import require_admin_api_key, require_api_key
+from app.core.exceptions import PaymentIntentNotFoundError, RefundNotFoundError, RefundStateError
 from app.db.database import get_db
-from app.auth.dependencies import require_api_key, require_admin_api_key
 from app.schemas.refunds_schemas import CreateRefundRequest
-from app.core.exceptions import RefundNotFoundError, RefundStateError
 from app.services.refunds_service import (
-    confirm_refund,
-    decline_refund,
     cancel_refund,
-    list_refunds,
+    confirm_refund,
     create_refund,
-    get_refund,
+    decline_refund,
     flag_refund,
-    review_refund,
+    get_refund,
     list_flagged_refunds,
+    list_refunds,
+    review_refund,
 )
 
 router = APIRouter(tags=["refunds"])
@@ -44,12 +45,7 @@ def list_flagged_refunds_route(
     db=Depends(get_db),
     api_key=Depends(require_admin_api_key),
 ):
-    return list_flagged_refunds(
-        db=db,
-        merchant_id=api_key.merchant_id,
-        limit=limit,
-        starting_after=starting_after,
-    )
+    return list_flagged_refunds(db=db, merchant_id=api_key.merchant_id, limit=limit, starting_after=starting_after)
 
 
 @router.post("/payment_intents/{payment_intent_id}/refunds")
@@ -60,21 +56,16 @@ def create_refund_route(
     api_key=Depends(require_api_key),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
-    return create_refund(
-        db,
-        payment_intent_id,
-        body.amount,
-        idempotency_key,
-        api_key.merchant_id,
-    )
+    try:
+        return create_refund(db, payment_intent_id, body.amount, idempotency_key, api_key.merchant_id)
+    except PaymentIntentNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RefundStateError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
 
 
 @router.get("/{refund_id}")
-def get_refund_route(
-    refund_id: str,
-    db=Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def get_refund_route(refund_id: str, db=Depends(get_db), api_key=Depends(require_api_key)):
     try:
         return get_refund(refund_id, db, api_key.merchant_id)
     except RefundNotFoundError:
@@ -82,12 +73,7 @@ def get_refund_route(
 
 
 @router.post("/{refund_id}/flag")
-def flag_refund_route(
-    refund_id: str,
-    reason: str,
-    db=Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def flag_refund_route(refund_id: str, reason: str, db=Depends(get_db), api_key=Depends(require_api_key)):
     try:
         return flag_refund(db, refund_id, reason, api_key.merchant_id)
     except RefundNotFoundError as exc:
@@ -110,11 +96,7 @@ def review_refund_route(
 
 
 @router.post("/{refund_id}/confirm")
-def confirm_refund_route(
-    refund_id: str,
-    db=Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def confirm_refund_route(refund_id: str, db=Depends(get_db), api_key=Depends(require_api_key)):
     try:
         return confirm_refund(refund_id, db, api_key.merchant_id)
     except RefundNotFoundError as exc:
@@ -124,11 +106,7 @@ def confirm_refund_route(
 
 
 @router.post("/{refund_id}/decline")
-def decline_refund_route(
-    refund_id: str,
-    db=Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def decline_refund_route(refund_id: str, db=Depends(get_db), api_key=Depends(require_api_key)):
     try:
         return decline_refund(refund_id, db, api_key.merchant_id)
     except RefundNotFoundError as exc:
@@ -138,11 +116,7 @@ def decline_refund_route(
 
 
 @router.post("/{refund_id}/cancel")
-def cancel_refund_route(
-    refund_id: str,
-    db=Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def cancel_refund_route(refund_id: str, db=Depends(get_db), api_key=Depends(require_api_key)):
     try:
         return cancel_refund(refund_id, db, api_key.merchant_id)
     except RefundNotFoundError as exc:

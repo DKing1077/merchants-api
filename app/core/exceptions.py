@@ -21,3 +21,10 @@ class InvalidTimestamp(Exception):
 class IdempotencyConflictError(Exception):
     pass
 
+
+class RiskRateLimitError(Exception):
+    pass
+
+
+class DuplicateLedgerEntryError(Exception):
+    pass

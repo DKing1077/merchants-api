@@ -1,5 +1,6 @@
-from enum import Enum
 from datetime import datetime
+from enum import Enum
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -20,6 +21,9 @@ class PaymentIntentResponse(BaseModel):
     id: str
     merchant_id: str
     amount: int
+    captured_amount: int
+    total_refunded: int
+    risk_score: int
     currency: str
     status: PaymentIntentStatus
     is_flagged: bool
@@ -27,6 +31,8 @@ class PaymentIntentResponse(BaseModel):
     review_reason: str | None = None
     created_at: datetime
     updated_at: datetime
+
+    model_config = {"from_attributes": True}
 
 
 class CreatePaymentIntentRequest(BaseModel):
@@ -36,17 +42,21 @@ class CreatePaymentIntentRequest(BaseModel):
 
     @field_validator("merchant_id")
     @classmethod
-    def validate_merchant_id(cls, value):
+    def validate_merchant_id(cls, value: str) -> str:
         if not value or not value.strip():
             raise ValueError("merchant_id must not be blank")
         return value
 
     @field_validator("currency")
     @classmethod
-    def validate_currency(cls, value):
-        if not value.isalpha() or value != value.upper() or len(value) != 3:
-            raise ValueError("currency must be exactly 3 uppercase letters")
-        return value
+    def validate_currency(cls, value: str) -> str:
+        if not value.isalpha() or len(value) != 3:
+            raise ValueError("currency must be exactly 3 letters")
+        return value.lower()
+
+
+class CapturePaymentIntentRequest(BaseModel):
+    amount: int | None = Field(default=None, gt=0)
 
 
 class FlagPaymentIntentRequest(BaseModel):
@@ -55,4 +65,3 @@ class FlagPaymentIntentRequest(BaseModel):
 
 class ReviewPaymentIntentRequest(BaseModel):
     review_status: ReviewStatus
-

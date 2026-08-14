@@ -1,50 +1,74 @@
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy import Column, DateTime, String, Text, Boolean
-from sqlalchemy import Integer, ForeignKey, func
+from __future__ import annotations
+
 from datetime import datetime, timezone
-from app.db.database import Base
 import uuid
 
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func, select
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import column_property
 
-# Stores a merchant payment request and its lifecycle state.
+from app.db.database import Base
+
+
 class PaymentIntent(Base):
     __tablename__ = "payment_intents"
 
     id = Column(String, primary_key=True, index=True)
     merchant_id = Column(String, nullable=False, index=True)
     amount = Column(Integer, nullable=False)
+    captured_amount = Column(Integer, nullable=False, default=0)
+    risk_score = Column(Integer, nullable=False, default=0)
     currency = Column(String(3), nullable=False)
     status = Column(String, nullable=False)
     idempotency_key = Column(String, unique=True, nullable=True)
-
     is_flagged = Column(Boolean, default=False, nullable=False)
     review_status = Column(String, nullable=True)
     review_reason = Column(Text, nullable=True)
-
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
-# Stores refund records linked to a payment intent.
 class Refunds(Base):
     __tablename__ = "refunds"
 
-    id = Column(String, primary_key=True, index=True, nullable=False, unique=True, default=lambda: str(uuid.uuid4()))
+    id = Column(
+        String,
+        primary_key=True,
+        index=True,
+        nullable=False,
+        unique=True,
+        default=lambda: str(uuid.uuid4()),
+    )
     merchant_id = Column(String, nullable=False, index=True)
     payment_intent_id = Column(String, ForeignKey("payment_intents.id"), nullable=False)
     amount = Column(Integer, nullable=False)
     status = Column(String, nullable=False)
     idempotency_key = Column(String, unique=True, nullable=True)
-
     is_flagged = Column(Boolean, default=False, nullable=False)
     review_status = Column(String, nullable=True)
     review_reason = Column(Text, nullable=True)
-
     created_at = Column(DateTime, server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now(), nullable=False)
+    updated_at = Column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
 
 
-# Stores internal domain events for later processing or webhook fan-out.
+PaymentIntent.total_refunded = column_property(
+    select(func.coalesce(func.sum(Refunds.amount), 0))
+    .where(Refunds.payment_intent_id == PaymentIntent.id, Refunds.status == "confirmed")
+    .correlate_except(Refunds)
+    .scalar_subquery()
+)
+
+
 class Event(Base):
     __tablename__ = "events"
 
@@ -55,7 +79,6 @@ class Event(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-# Stores merchant webhook endpoint configuration.
 class WebhookEndpoint(Base):
     __tablename__ = "webhook_endpoints"
 
@@ -65,12 +88,10 @@ class WebhookEndpoint(Base):
     event_types = Column(JSONB, nullable=False)
     secret = Column(String, nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
-# Stores a queued webhook dispatch for a specific event and endpoint.
 class WebhookDispatch(Base):
     __tablename__ = "webhook_dispatches"
 
@@ -79,11 +100,10 @@ class WebhookDispatch(Base):
     webhook_endpoint_id = Column(String, ForeignKey("webhook_endpoints.id"), nullable=False, index=True)
     payload = Column(JSONB, nullable=False)
     status = Column(String, default="pending", nullable=False)
-
+    next_retry_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-# Stores each webhook delivery attempt and its result.
 class WebhookDelivery(Base):
     __tablename__ = "webhook_deliveries"
 
@@ -96,7 +116,6 @@ class WebhookDelivery(Base):
     status = Column(String, default="pending", nullable=False)
     next_retry_at = Column(DateTime, nullable=True)
     delivered_at = Column(DateTime, nullable=True)
-
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -108,11 +127,9 @@ class LedgerAccount(Base):
     name = Column(String, nullable=False)
     account_type = Column(String, nullable=False)
     currency = Column(String(3), nullable=False)
-
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-# Represents one immutable ledger transaction entry.
 class LedgerEntry(Base):
     __tablename__ = "ledger_entries"
 
@@ -121,11 +138,9 @@ class LedgerEntry(Base):
     reference_id = Column(String, nullable=True, index=True)
     description = Column(Text, nullable=True)
     entry_metadata = Column(JSONB, nullable=True)
-
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-# Represents one movement line in a ledger entry; balances come from summing these.
 class LedgerPosting(Base):
     __tablename__ = "ledger_postings"
 
@@ -134,11 +149,9 @@ class LedgerPosting(Base):
     account_id = Column(String, ForeignKey("ledger_accounts.id"), nullable=False, index=True)
     amount = Column(Integer, nullable=False)
     currency = Column(String(3), nullable=False)
-
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
-# Represents an API key for a merchant, used for authenticating requests to the API.
 class ApiKey(Base):
     __tablename__ = "api_keys"
 
@@ -148,4 +161,3 @@ class ApiKey(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     is_admin = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
-
