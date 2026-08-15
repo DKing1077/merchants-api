@@ -1,7 +1,13 @@
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+class AccountType(str, Enum):
+    cash = "cash"
+    merchant_payable = "merchant_payable"
 
 
 class LedgerAccountCreate(BaseModel):
