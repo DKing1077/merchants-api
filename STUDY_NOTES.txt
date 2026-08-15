@@ -18,7 +18,7 @@ MERCHANTS API - SUPER CONCISE STUDY NOTES
 - End of boot: Base.metadata.create_all(bind=engine) creates tables from models.
 
 2) SETTINGS / RUNTIME ASSUMPTIONS
-- app.core.config is imported everywhere but the file is missing in this repo clone.
+- app.core.config is referenced across the app, but app/core/config.py is not present in this checkout.
 - The missing Settings object is expected to provide at least:
   - app_name
   - app_version
@@ -197,7 +197,7 @@ MERCHANTS API - SUPER CONCISE STUDY NOTES
     - POSTs JSON via httpx
     - sets X-Webhook-Signature
     - success = HTTP 2xx
-    - retries up to 3 attempts with 5 minute delay
+    - retries up to 3 attempts with 5-minute delay
     - stores each attempt in webhook_deliveries
 - app/services/timestamp_service.py
   - generic created_at / updated_at fetchers by table + id
