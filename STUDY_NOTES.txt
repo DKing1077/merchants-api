@@ -1,634 +1,317 @@
-================================================================================
-  MERCHANTS API — BACKEND ENGINEERING STUDY NOTES
-================================================================================
-
-These notes cover every concept in this repo so you can rebuild it from scratch.
-
---------------------------------------------------------------------------------
-1. WHAT THIS API DOES
---------------------------------------------------------------------------------
-A payment-processing backend for merchants. Merchants can:
-  - Create & manage payment intents (like Stripe)
-  - Issue refunds against those payments
-  - Register webhook endpoints to receive event notifications
-  - View a double-entry ledger of all money movements
-  - Generate API keys to authenticate requests
-  - View risk / fraud summaries (admin only)
-
-
---------------------------------------------------------------------------------
-2. TECH STACK (requirements.txt)
---------------------------------------------------------------------------------
-fastapi          — web framework (declares routes, handles HTTP)
-uvicorn          — ASGI server that runs the FastAPI app
-sqlalchemy       — ORM: maps Python classes to database tables
-psycopg2-binary  — PostgreSQL database driver
-alembic          — database migration tool (version-controls the schema)
-pydantic-settings— reads settings from environment variables / .env files
-httpx            — async HTTP client (used to deliver webhooks)
-pytest           — test runner
-
-
---------------------------------------------------------------------------------
-3. PROJECT LAYOUT
---------------------------------------------------------------------------------
-app/
-  main.py                  ← FastAPI app entry-point, middleware, routers
-  core/
-    config.py              ← settings (DATABASE_URL, thresholds, etc.)
-    exceptions.py          ← custom exception classes
-    observability.py       ← logging + Prometheus-style metrics
-  db/
-    database.py            ← SQLAlchemy engine + session factory
-    models/models.py       ← ORM model classes (one class = one table)
-  schemas/                 ← Pydantic request/response shapes
-  api/routes/              ← FastAPI routers (one file per resource)
-  services/                ← business logic (no HTTP code here)
-  auth/dependencies.py     ← API-key authentication helpers
-  tests/                   ← pytest test files
-alembic/
-  versions/                ← one .py file per schema migration
-Dockerfile                 ← how to build the container image
-docker-compose.yaml        ← how to run the app + postgres together
-
-
---------------------------------------------------------------------------------
-4. CORE BACKEND CONCEPTS
---------------------------------------------------------------------------------
-
-REST API
-  - HTTP protocol: GET (read), POST (create), PUT (replace), DELETE (remove)
-  - Status codes: 200 OK, 201 Created, 400 Bad Request, 401 Unauthorized,
-    403 Forbidden, 404 Not Found, 409 Conflict, 429 Too Many Requests,
-    503 Service Unavailable
-  - URL path params: /payment_intents/{id}
-  - Query params: ?limit=20&status=succeeded
-  - Request body: JSON payload sent with POST/PUT
-  - Response body: JSON returned to caller
-
-Authentication
-  - Client puts their API key in the "Authorization" header
-  - Server hashes it with SHA-256 and looks up the hash in the DB
-  - Never store raw API keys — only store the hash
-  - Admin routes use a second check: api_key.is_admin must be True
-
-Idempotency
-  - Client sends optional "Idempotency-Key" header
-  - If the server sees the same key again it returns the original result
-  - Prevents duplicate payments if the client retries after a network error
-
-Pagination (cursor-based)
-  - "starting_after" = ID of the last item on the previous page
-  - Server fetches limit+1 rows; if count > limit, "has_more": true
-  - Returns {"data": [...], "has_more": true/false}
-
-Events & Webhooks
-  - Every state change (payment confirmed, refund created, etc.) creates an
-    Event row in the DB
-  - The dispatch service finds all active WebhookEndpoints for that merchant
-    that subscribed to that event type and creates a WebhookDispatch per endpoint
-  - The delivery service makes an HTTP POST to each endpoint URL with a
-    HMAC-SHA256 signature in the header so the receiver can verify authenticity
-  - If delivery fails it is retried with exponential back-off
-
-Double-Entry Ledger
-  - Every monetary transaction has at least two postings (debit + credit)
-  - Debits and credits for one entry must net to zero (balanced books)
-  - Accounts have a type: "cash" or "merchant_payable"
-  - Balance = sum of all posting amounts for an account
-
-Risk / Fraud
-  - On payment creation, a risk_score is calculated (based on velocity, amount)
-  - Payments over HIGH_VALUE_PAYMENT_THRESHOLD are auto-flagged for review
-  - Velocity limit: too many payments in a short window → 429 error
-  - Admin can flag, approve, or reject individual payments/refunds
-
-Observability
-  - Structured logging: every request logs method, path, status, latency
-  - request_id_context: each request gets a UUID attached to every log line
-  - Prometheus metrics exposed at /metrics: request counts, error counts,
-    latency histograms per route
-
-
---------------------------------------------------------------------------------
-5. FASTAPI ESSENTIALS
---------------------------------------------------------------------------------
-
-# Create app
-app = FastAPI(title="My API")
-
-# Router (groups related endpoints)
-router = APIRouter(prefix="/items", tags=["items"])
-
-# Route decorator
-@router.get("/{item_id}", response_model=ItemResponse)
-def get_item(item_id: str, db=Depends(get_db), api_key=Depends(require_api_key)):
-    ...
-
-# Register router on app
-app.include_router(router, prefix="/v1")
-
-# Dependency injection — FastAPI calls the function and injects the result
-def get_db():          # yields a DB session
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-# Middleware — wraps every request
-@app.middleware("http")
-async def my_middleware(request: Request, call_next):
-    response = await call_next(request)
-    response.headers["X-Custom"] = "value"
-    return response
-
-# Raise HTTP errors
-raise HTTPException(status_code=404, detail="Not found")
-
-# Path params:  GET /items/{item_id}  → item_id: str
-# Query params: GET /items?limit=20   → limit: int = Query(default=20, ge=1, le=100)
-# Header:       Authorization: ...    → authorization: str = Header(alias="Authorization")
-# Body:         POST JSON             → request: MyPydanticModel
-
-
---------------------------------------------------------------------------------
-6. PYDANTIC SCHEMAS
---------------------------------------------------------------------------------
-Pydantic validates incoming JSON and serialises outgoing data.
-
-from pydantic import BaseModel, Field, field_validator
-from enum import Enum
-
-class Status(str, Enum):
-    pending = "pending"
-    confirmed = "confirmed"
-
-class CreateRequest(BaseModel):
-    amount: int = Field(..., gt=0)          # required, must be > 0
-    currency: str = Field(..., min_length=3, max_length=3)
-    merchant_id: str
-
-    @field_validator("currency")
-    @classmethod
-    def validate_currency(cls, v: str) -> str:
-        if not v.isalpha():
-            raise ValueError("must be letters only")
-        return v.lower()
-
-class Response(BaseModel):
-    id: str
-    amount: int
-    status: Status
-
-    model_config = {"from_attributes": True}   # allows ORM object → Pydantic
-
-Key: "from_attributes": True lets you return a SQLAlchemy model object directly
-     as the response_model — Pydantic reads its attributes automatically.
-
-
---------------------------------------------------------------------------------
-7. SQLALCHEMY ORM
---------------------------------------------------------------------------------
-
-# Base class all models inherit from
-from sqlalchemy.orm import declarative_base
-Base = declarative_base()
-
-# Model definition
-class PaymentIntent(Base):
-    __tablename__ = "payment_intents"
-
-    id            = Column(String, primary_key=True, index=True)
-    merchant_id   = Column(String, nullable=False, index=True)
-    amount        = Column(Integer, nullable=False)
-    currency      = Column(String(3), nullable=False)
-    status        = Column(String, nullable=False)
-    is_flagged    = Column(Boolean, default=False, nullable=False)
-    created_at    = Column(DateTime, server_default=func.now())
-    updated_at    = Column(DateTime, server_default=func.now(), onupdate=func.now())
-
-# Foreign key
-payment_intent_id = Column(String, ForeignKey("payment_intents.id"), nullable=False)
-
-# JSONB column (PostgreSQL only, stores arbitrary JSON efficiently)
-payload = Column(JSONB, nullable=False)
-
-# Computed column (SQL subquery result attached to the model)
-PaymentIntent.total_refunded = column_property(
-    select(func.coalesce(func.sum(Refunds.amount), 0))
-    .where(Refunds.payment_intent_id == PaymentIntent.id, Refunds.status == "confirmed")
-    .scalar_subquery()
-)
-
-# Session usage
-db.add(obj)          # stage insert
-db.flush()           # write to DB but keep transaction open (get generated IDs)
-db.commit()          # commit transaction
-db.refresh(obj)      # reload from DB (picks up server-generated values)
-db.query(Model).filter(...).first()
-db.query(Model).filter(...).all()
-db.query(Model).filter(...).limit(n).all()
-
-
---------------------------------------------------------------------------------
-8. DATABASE SESSION FACTORY
---------------------------------------------------------------------------------
-engine = create_engine(settings.database_url)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-def get_db():           # FastAPI dependency — yields one session per request
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
---------------------------------------------------------------------------------
-9. ALEMBIC MIGRATIONS
---------------------------------------------------------------------------------
-Alembic version-controls your database schema changes.
-
-alembic init alembic             # sets up alembic directory
-alembic revision --autogenerate -m "add column"   # generate migration
-alembic upgrade head             # apply all pending migrations
-alembic downgrade -1             # roll back one migration
-
-Each migration file has:
-  - revision  — unique ID for this migration
-  - down_revision — ID of the previous migration (forms a chain)
-  - upgrade()  — SQL to apply the change
-  - downgrade()— SQL to undo the change
-
-op.create_table("my_table", sa.Column("id", sa.String(), primary_key=True), ...)
-op.add_column("table", sa.Column("col", sa.String()))
-op.drop_table("my_table")
-
-
---------------------------------------------------------------------------------
-10. AUTHENTICATION — HOW IT WORKS END-TO-END
---------------------------------------------------------------------------------
-1. POST /v1/api_keys  →  server generates random key (secrets.token_hex(32))
-                         hashes it (hashlib.sha256(key.encode()).hexdigest())
-                         stores only the HASH in api_keys table
-                         returns the RAW key to the client (only time it's shown)
-
-2. Client stores the raw key and sends it in every request:
-   Authorization: <raw_key>
-
-3. Server dependency require_api_key():
-   a. Takes Authorization header value
-   b. SHA-256 hashes it
-   c. Queries api_keys WHERE key_hash = ? AND is_active = True
-   d. Raises 401 if not found
-   e. Returns the ApiKey object (contains merchant_id, is_admin)
-
-4. require_admin_api_key() wraps require_api_key() and additionally
-   checks api_key.is_admin, raises 403 if false.
-
-
---------------------------------------------------------------------------------
-11. DATABASE MODELS (all tables)
---------------------------------------------------------------------------------
-
-payment_intents      — core payment record
-  id, merchant_id, amount, captured_amount, risk_score, currency, status,
-  idempotency_key, is_flagged, review_status, review_reason, created_at, updated_at
-  status values: requires_payment_method → requires_capture → succeeded | canceled
-
-refunds              — refund against a payment intent
-  id, merchant_id, payment_intent_id (FK), amount, status, idempotency_key,
-  is_flagged, review_status, review_reason, created_at, updated_at
-  status values: pending → confirmed | declined | canceled
-
-events               — immutable audit log of every state change
-  id, type (e.g. "payment_intent.created"), object_id, payload (JSONB), created_at
-
-webhook_endpoints    — a merchant's registered URL to receive events
-  id, merchant_id, url, event_types (JSONB list), secret, is_active, created_at, updated_at
-
-webhook_dispatches   — one pending delivery job per (event × endpoint)
-  id, event_id (FK), webhook_endpoint_id (FK), payload (JSONB), status,
-  next_retry_at, created_at
-
-webhook_deliveries   — one row per HTTP attempt for a dispatch
-  id, webhook_dispatch_id (FK), attempt_number, response_status, response_body,
-  error_message, status, next_retry_at, delivered_at, created_at
-
-ledger_accounts      — a named account for a merchant (cash, merchant_payable)
-  id, merchant_id, name, account_type, currency, created_at
-
-ledger_entries       — a double-entry transaction (groups postings)
-  id, entry_type, reference_id, description, entry_metadata (JSONB), created_at
-
-ledger_postings      — one debit or credit line within a ledger entry
-  id, entry_id (FK), account_id (FK), amount, currency, created_at
-  (positive = debit, negative = credit; must balance per entry)
-
-api_keys             — hashed API keys for merchant auth
-  id, key_hash, merchant_id, is_active, is_admin, created_at
-
-
---------------------------------------------------------------------------------
-12. SERVICE LAYER — BUSINESS LOGIC
---------------------------------------------------------------------------------
-Services contain the real logic. Routes are thin — they just validate input,
-call a service function, and map exceptions to HTTP status codes.
-
-payment_service.py
-  create_payment_intent()  — idempotency check → velocity limit → risk score
-                             → build PaymentIntent → create Event → dispatch webhooks
-  confirm_payment_intent() — status: requires_payment_method → requires_capture
-  capture_payment_intent() — status: requires_capture → succeeded (or stays)
-                             creates double-entry ledger posting
-  cancel_payment_intent()  — cannot cancel if already succeeded
-  flag_payment_intent()    — sets is_flagged=True, review_status=pending_review
-  review_payment_intent()  — sets review_status to approved|rejected
-
-refunds_service.py
-  create_refund()   — payment must be succeeded; refund ≤ remaining capturable amount
-  confirm_refund()  — pending → confirmed
-  decline_refund()  — pending → declined
-  cancel_refund()   — pending → canceled
-  flag_refund()     — sets is_flagged
-  review_refund()   — sets review_status
-
-risk_service.py
-  calculate_risk_score()   — score 0-100 based on amount, recent activity
-  enforce_velocity_limit() — raises RiskRateLimitError if too many payments
-                             in the last time window (configurable)
-
-ledger_service.py
-  create_ledger_entry()          — creates entry + postings in a transaction
-  get_account_balance_details()  — sums all postings for an account
-  get_balance_sheet()            — groups accounts by type + currency for a merchant
-  list_account_entries()         — paginated list of entries for an account
-
-events.py
-  create_event()  — inserts an Event row (type, object_id, JSONB payload)
-
-dispatch.py
-  create_dispatches_for_event()  — finds all active endpoints subscribed to that
-                                   event type, creates a WebhookDispatch per one
-
-delivery.py
-  process_pending_dispatches()   — polls pending dispatches, sends HTTP POST to
-                                   each endpoint, records delivery result,
-                                   schedules retry on failure
-
-timestamp_service.py
-  get_created_at() / get_updated_at()  — generic helpers to fetch timestamp
-                                         fields from any model by primary key
-
-
---------------------------------------------------------------------------------
-13. EXCEPTION → HTTP STATUS MAPPING
---------------------------------------------------------------------------------
-Exceptions are defined in core/exceptions.py and caught in routes:
-
-PaymentIntentNotFoundError   → 404
-InvalidPaymentIntentStateError → 409
-RefundNotFoundError          → 404
-RefundStateError             → 409
-IdempotencyConflictError     → 409
-RiskRateLimitError           → 429
-DuplicateLedgerEntryError    → 409
-InvalidTimestamp             → 400
-
-
---------------------------------------------------------------------------------
-14. DOCKERFILE — LINE BY LINE
---------------------------------------------------------------------------------
-FROM python:3.12-slim
-  # Start from an official slim Python 3.12 image (small OS footprint)
-
-ENV PYTHONDONTWRITEBYTECODE=1
-  # Don't create .pyc bytecode files (cleaner image)
-
-ENV PYTHONUNBUFFERED=1
-  # Print stdout/stderr immediately (don't buffer logs)
-
-WORKDIR /app
-  # All subsequent commands run in /app inside the container
-
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential \
-    && rm -rf /var/lib/apt/lists/*
-  # Install C build tools needed to compile some Python packages
-  # Remove apt cache afterwards to keep the image small
-
-COPY requirements.txt .
-  # Copy only requirements first (layer caching — only re-run pip if deps change)
-
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
-  # Install Python dependencies (no cache to keep image small)
-
-COPY . .
-  # Copy the rest of the source code
-
-EXPOSE 8000
-  # Document that the container listens on port 8000 (informational only)
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-  # Default command: start uvicorn ASGI server
-  # app.main:app → file app/main.py, variable named "app"
-  # 0.0.0.0 → listen on all network interfaces (not just localhost)
-
-
---------------------------------------------------------------------------------
-15. DOCKER COMPOSE — LINE BY LINE
---------------------------------------------------------------------------------
-services:
-  app:
-    build: .                         # build image from Dockerfile in current dir
-    container_name: merchant-api
-    ports:
-      - "8000:8000"                  # host_port:container_port
-    env_file:
-      - .env                         # load environment variables from .env file
-    environment:
-      DATABASE_URL: postgres://...   # override / add env vars
-    depends_on:
-      postgres:
-        condition: service_healthy   # wait until postgres health check passes
-    volumes:
-      - .:/app                       # mount local dir into container (hot reload)
-    command: sh -c "alembic upgrade head && uvicorn ... --reload"
-      # override CMD: run migrations first, then start server with auto-reload
-
-  postgres:
-    image: postgres:16               # use official postgres image, no build
-    container_name: merchant-postgres
-    restart: unless-stopped          # auto-restart on crash
-    environment:
-      POSTGRES_DB: merchants         # database name to create
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d merchants"]
-      interval: 5s
-      timeout: 5s
-      retries: 10                    # app waits until this passes
-    volumes:
-      - postgres_data:/var/lib/postgresql/data   # named volume → data persists
-
-volumes:
-  postgres_data:                     # declare named volume (managed by Docker)
-
-
---------------------------------------------------------------------------------
-16. API ENDPOINTS QUICK REFERENCE
---------------------------------------------------------------------------------
-All routes (except POST /v1/api_keys) require Authorization header.
-
-PAYMENT INTENTS  prefix: /v1/payment_intents
-  GET    /                           list (paginated, filterable)
-  POST   /                           create (body: merchant_id, amount, currency)
-  GET    /{id}                       get one
-  POST   /{id}/confirm               requires_payment_method → requires_capture
-  POST   /{id}/capture               requires_capture → succeeded
-  POST   /{id}/cancel                cancel if not succeeded
-  GET    /{id}/transactions          timeline of events for this payment
-  GET    /transactions               all transactions for the merchant
-  GET    /admin/flagged              [admin] flagged payments
-  POST   /admin/{id}/flag            [admin] flag for review
-  POST   /admin/{id}/review          [admin] approve or reject
-
-REFUNDS  prefix: /v1/refunds
-  GET    /                           list refunds
-  POST   /payment_intents/{id}/refunds  create refund (body: amount)
-  GET    /{refund_id}                get one
-  POST   /{refund_id}/confirm        pending → confirmed
-  POST   /{refund_id}/decline        pending → declined
-  POST   /{refund_id}/cancel         pending → canceled
-  POST   /{refund_id}/flag           flag for review
-  GET    /admin/flagged              [admin] flagged refunds
-  POST   /admin/{refund_id}/review   [admin] review a refund
-
-WEBHOOKS  prefix: /v1/webhooks
-  POST   /endpoints                  register a webhook URL
-  GET    /endpoints                  list your endpoints
-  PUT    /endpoints/{id}             update an endpoint
-  DELETE /endpoints/{id}             delete an endpoint
-  GET    /endpoints/{id}/deliveries  delivery history for endpoint
-  GET    /dispatches                 list dispatch jobs
-  GET    /dispatches/{id}            get one dispatch + deliveries
-  GET    /deliveries                 list all deliveries
-  POST   /dispatches/process         trigger delivery of pending dispatches
-
-LEDGER  prefix: /v1/ledger
-  POST   /accounts                   create an account
-  GET    /accounts                   list your accounts
-  POST   /entries                    create a ledger entry
-  GET    /accounts/{id}/balance      account balance
-  GET    /accounts/{id}/entries      paginated entry history
-  GET    /merchant/{id}/balance_sheet grouped balance sheet
-
-API KEYS  prefix: /v1/api_keys
-  POST   /                           create a new API key (returns raw key once)
-
-RISK  prefix: /v1/admin/risk
-  GET    /summary                    [admin] fraud summary per merchant
-
-TIMESTAMPS  prefix: /v1/timestamps/payment_intents
-  GET    /{id}/created_at
-  GET    /{id}/updated_at
-
-SYSTEM
-  GET    /                           health ping
-  GET    /health                     db connectivity check
-  GET    /metrics                    Prometheus metrics
-
-
---------------------------------------------------------------------------------
-17. KEY PYTHON SYNTAX PATTERNS USED
---------------------------------------------------------------------------------
-
-# Type hints (Python 3.10+ union shorthand)
-def foo(x: str | None = None) -> dict:
-
-# f-strings
-id = f"pi_{uuid.uuid4()}"
-
-# List comprehension
-[row.id for row in rows]
-
-# Dictionary
-return {"data": rows[:limit], "has_more": len(rows) > limit}
-
-# Lambda (used as column default)
-default=lambda: str(uuid.uuid4())
-
-# Enum
-class Status(str, Enum):
-    pending = "pending"
-
-# Custom exception
-class PaymentNotFoundError(Exception):
-    pass
-
-raise PaymentNotFoundError("not found")
-
-try:
-    ...
-except PaymentNotFoundError as exc:
-    raise HTTPException(status_code=404, detail=str(exc))
-
-# Context variable (per-request storage without global state)
-import contextvars
-request_id_context: contextvars.ContextVar[str] = contextvars.ContextVar("request_id", default="-")
-token = request_id_context.set("abc123")
-request_id_context.get()   # returns "abc123" anywhere in this request's call stack
-request_id_context.reset(token)  # clean up after request
-
-# defaultdict (auto-initialises missing keys)
-from collections import defaultdict
-counts = defaultdict(int)
-counts["key"] += 1   # no KeyError
-
-# SHA-256 hashing
-import hashlib
-hashlib.sha256("my_key".encode()).hexdigest()
-
-# Secure random tokens
-import secrets
-secrets.token_hex(32)   # 64-char hex string
-
-
---------------------------------------------------------------------------------
-18. TESTING
---------------------------------------------------------------------------------
-Tests use pytest + httpx TestClient to simulate HTTP requests without a real server.
-
-Run: PYTHONPATH=. pytest app/tests -q
-
-conftest.py provides shared fixtures:
-  - db fixture: in-memory SQLite session (no real Postgres needed)
-  - client fixture: TestClient(app) with the test DB injected
-
-Pattern:
-  def test_create_payment(client, db):
-      response = client.post("/v1/payment_intents", json={...}, headers={"Authorization": key})
-      assert response.status_code == 201
-      assert response.json()["status"] == "requires_payment_method"
-
-
---------------------------------------------------------------------------------
-19. HOW TO REBUILD FROM SCRATCH (checklist)
---------------------------------------------------------------------------------
- 1. pip install fastapi uvicorn sqlalchemy psycopg2-binary alembic pydantic-settings httpx
- 2. Create app/core/config.py  — Pydantic Settings class reading DATABASE_URL from env
- 3. Create app/core/exceptions.py  — custom Exception subclasses
- 4. Create app/db/database.py  — engine, SessionLocal, get_db(), Base
- 5. Create app/db/models/models.py  — one class per table inheriting Base
- 6. Create app/schemas/*.py  — Pydantic BaseModel for each request/response shape
- 7. Create app/services/*.py  — pure business logic functions, no HTTP
- 8. Create app/auth/dependencies.py  — require_api_key, require_admin_api_key
- 9. Create app/api/routes/*.py  — APIRouter, routes call services, map exceptions
-10. Create app/main.py  — FastAPI(), middleware, include_router(), Base.metadata.create_all()
-11. alembic init alembic → edit env.py to point at your models → alembic revision --autogenerate
-12. Write Dockerfile + docker-compose.yaml
-13. docker compose up  →  app available at http://localhost:8000
-
-================================================================================
+MERCHANTS API - SUPER CONCISE STUDY NOTES
+
+1) ENTRY POINT FIRST
+- app/main.py boots FastAPI, imports models, creates DB if missing, sets logging/metrics, then mounts all routers.
+- Middleware: assigns X-Request-ID, times every request, logs request_complete/request_failed, and updates in-memory Prometheus-style metrics.
+- Base routes:
+  - GET / -> {"message": "API is running"}
+  - GET /health -> checks DB with SELECT 1 and returns version
+  - GET /metrics -> plain-text counters + latency histograms
+- Router mount order:
+  - /v1/payment_intents
+  - /v1/refunds
+  - /v1/webhooks
+  - /v1/ledger
+  - /v1/admin/risk
+  - /v1/timestamps/payment_intents
+  - /v1/api_keys
+- End of boot: Base.metadata.create_all(bind=engine) creates tables from models.
+
+2) SETTINGS / RUNTIME ASSUMPTIONS
+- app.core.config is imported everywhere but the file is missing in this repo clone.
+- The missing Settings object is expected to provide at least:
+  - app_name
+  - app_version
+  - database_url
+  - metrics_latency_buckets
+  - merchant_velocity_window_seconds
+  - merchant_velocity_limit
+  - high_value_payment_threshold
+
+3) DB SETUP
+- app/db/database.py:
+  - engine = create_engine(settings.database_url)
+  - SessionLocal = sessionmaker(...)
+  - Base = declarative_base()
+  - get_db() yields a DB session per request.
+  - create_database_if_missing() only does work for Postgres; it connects to the postgres admin DB and creates the target DB if absent.
+- Alembic:
+  - alembic/env.py loads Settings().database_url and migrates Base.metadata.
+  - 2f837bbf0498_initial_schema.py creates the first payment_intents + refunds tables.
+  - 4b9a66e4f7a1_feature_expansion.py adds merchant/risk/review fields and creates events, webhooks, ledger, and api_keys tables.
+
+4) MODELS (SOURCE OF TRUTH)
+- PaymentIntent:
+  - id, merchant_id, amount, captured_amount, risk_score, currency, status
+  - idempotency_key
+  - is_flagged, review_status, review_reason
+  - created_at, updated_at
+  - computed total_refunded = sum of confirmed refunds
+- Refunds:
+  - id, merchant_id, payment_intent_id, amount, status
+  - idempotency_key
+  - is_flagged, review_status, review_reason
+  - created_at, updated_at
+- Event:
+  - type, object_id, payload(JSONB), created_at
+- WebhookEndpoint:
+  - merchant_id, url, event_types(JSONB), secret, is_active
+- WebhookDispatch:
+  - event_id, webhook_endpoint_id, payload, status, next_retry_at
+- WebhookDelivery:
+  - webhook_dispatch_id, attempt_number, response_status/body, error_message, status, retry info
+- LedgerAccount:
+  - merchant_id, name, account_type, currency
+- LedgerEntry:
+  - entry_type, reference_id, description, entry_metadata
+- LedgerPosting:
+  - entry_id, account_id, amount, currency
+- ApiKey:
+  - key_hash, merchant_id, is_active, is_admin
+
+5) AUTH / ACCESS RULES
+- app/auth/dependencies.py:
+  - Authorization header is treated as the raw API key.
+  - API key is SHA-256 hashed and matched against api_keys.key_hash.
+  - require_api_key -> 401 on missing/invalid key.
+  - require_admin_api_key -> 403 unless is_admin=True.
+
+6) ROUTES (EXTERNAL API SURFACE)
+- Payments routes: app/api/routes/payments.py
+  - GET /v1/payment_intents/ -> list merchant payment intents with filters: limit, starting_after, status, created_after/before, currency
+  - POST /v1/payment_intents -> create payment intent; enforces merchant match; supports Idempotency-Key
+  - GET /v1/payment_intents/admin/flagged -> admin list of flagged payment intents
+  - GET /v1/payment_intents/transactions -> flattened transaction history across all merchant payment intents
+  - GET /v1/payment_intents/{id}/transactions -> transaction history for one payment intent
+  - GET /v1/payment_intents/{id} -> fetch one payment intent
+  - POST /v1/payment_intents/admin/{id}/flag -> flag a payment intent with a reason
+  - POST /v1/payment_intents/admin/{id}/review -> set review_status
+  - POST /v1/payment_intents/{id}/confirm -> move to requires_capture
+  - POST /v1/payment_intents/{id}/capture -> capture full or partial amount
+  - POST /v1/payment_intents/{id}/cancel -> cancel remaining flow
+- Refund routes: app/api/routes/refunds.py
+  - GET /v1/refunds -> list refunds with limit, cursor, payment_intent_id, status
+  - GET /v1/refunds/admin/flagged -> admin list of flagged refunds
+  - POST /v1/refunds/payment_intents/{payment_intent_id}/refunds -> create refund; supports Idempotency-Key
+  - GET /v1/refunds/{refund_id} -> fetch one refund
+  - POST /v1/refunds/{refund_id}/flag -> flag refund
+  - POST /v1/refunds/admin/{refund_id}/review -> set refund review_status
+  - POST /v1/refunds/{refund_id}/confirm -> confirm refund
+  - POST /v1/refunds/{refund_id}/decline -> decline refund
+  - POST /v1/refunds/{refund_id}/cancel -> cancel refund
+- Webhook routes: app/api/routes/webhooks.py
+  - POST /v1/webhooks/endpoints -> create endpoint (HTTPS only)
+  - GET /v1/webhooks/endpoints -> list merchant endpoints
+  - PUT /v1/webhooks/endpoints/{id} -> update endpoint
+  - DELETE /v1/webhooks/endpoints/{id} -> delete endpoint
+  - GET /v1/webhooks/endpoints/{id}/deliveries -> all deliveries for one endpoint
+  - GET /v1/webhooks/dispatches -> list dispatches; optional status filter
+  - GET /v1/webhooks/dispatches/{id} -> dispatch + nested deliveries
+  - GET /v1/webhooks/deliveries -> all merchant deliveries
+  - POST /v1/webhooks/dispatches/process -> manually process pending dispatches
+- Ledger routes: app/api/routes/ledger.py
+  - POST /v1/ledger/accounts -> create ledger account for merchant
+  - GET /v1/ledger/accounts -> list merchant accounts
+  - POST /v1/ledger/entries -> create balanced double-entry record
+  - GET /v1/ledger/accounts/{id}/balance -> account metadata + current balance
+  - GET /v1/ledger/accounts/{id}/entries -> paginated entries with postings
+  - GET /v1/ledger/merchant/{merchant_id}/balance_sheet -> grouped balances by account_type + currency
+- Risk route: app/api/routes/risk.py
+  - GET /v1/admin/risk/summary -> admin aggregate by merchant: total, flagged, approved, rejected, avg risk
+- Timestamp routes: app/api/routes/timestamps.py
+  - GET /v1/timestamps/payment_intents/{id}/created_at
+  - GET /v1/timestamps/payment_intents/{id}/updated_at
+- API key route: app/api/routes/api_keys.py
+  - POST /v1/api_keys -> generates raw API key once, stores only SHA-256 hash
+
+7) SERVICES (BUSINESS LOGIC)
+- app/services/payment_service.py
+  - create_payment_intent():
+    - idempotency reuse by merchant + key
+    - risk checks
+    - high-value auto-flagging
+    - creates payment_intent.created event
+    - creates webhook dispatches
+  - get/list helpers:
+    - merchant-scoped reads
+    - cursor pagination
+  - list_payment_intent_transactions()/list_transactions():
+    - synthesizes fake transaction timeline objects from payment intent state
+  - flag/review:
+    - updates manual review fields
+  - confirm:
+    - state guardrails
+    - emits payment_intent.confirmed
+  - capture:
+    - supports partial capture
+    - auto-creates Cash + Merchant Payable ledger accounts if missing
+    - creates balanced ledger entry
+    - emits payment_intent.partially_captured or payment_intent.succeeded
+  - cancel:
+    - disallows cancel after succeeded
+    - emits payment_intent.canceled
+- app/services/refunds_service.py
+  - list/list_flagged -> cursor pagination
+  - create_refund():
+    - idempotency reuse
+    - payment intent must exist
+    - refund must be > 0
+    - captured funds must exist
+    - reserved + confirmed refunds cannot exceed captured_amount
+    - emits refund.created
+  - flag/review -> review workflow
+  - confirm_refund():
+    - only pending refunds
+    - rejected refunds cannot confirm
+    - confirmed refunds cannot exceed captured_amount
+    - requires existing cash + merchant_payable ledger accounts
+    - creates balanced refund ledger entry
+    - emits refund.confirmed
+  - decline_refund()/cancel_refund():
+    - pending only
+    - emits refund.declined / refund.canceled
+- app/services/ledger_service.py
+  - create_ledger_entry():
+    - needs at least 2 postings
+    - postings must sum to 0
+    - reference_id + entry_type must be unique
+  - get_account_balance_details() -> account metadata + sum(postings.amount)
+  - list_account_entries() -> paginated ledger entries + postings
+  - get_balance_sheet() -> grouped by account_type and currency
+- app/services/risk_service.py
+  - recent_payment_intent_count() -> merchant count in rolling window
+  - enforce_velocity_limit() -> raises RiskRateLimitError when limit hit
+  - calculate_risk_score():
+    - base score
+    - bumps for high amount, first merchant payment, and high recent velocity
+    - caps at 100
+- app/services/events.py
+  - create_event() inserts event row and flushes it.
+- app/services/dispatch.py
+  - create_dispatches_for_event() finds active endpoints for merchant and queues matching event types.
+- app/services/delivery.py
+  - generate_webhook_signature() -> HMAC-SHA256 over compact sorted JSON
+  - verify_webhook_signature() -> compare_digest
+  - process_pending_dispatches():
+    - picks pending dispatches whose retry time is due
+    - POSTs JSON via httpx
+    - sets X-Webhook-Signature
+    - success = HTTP 2xx
+    - retries up to 3 attempts with 5 minute delay
+    - stores each attempt in webhook_deliveries
+- app/services/timestamp_service.py
+  - generic created_at / updated_at fetchers by table + id
+
+8) SCHEMAS / VALIDATION
+- Payment schemas:
+  - statuses: requires_payment_method, requires_capture, succeeded, canceled
+  - review statuses: pending_review, approved, rejected
+  - merchant_id cannot be blank
+  - currency must be exactly 3 letters and is normalized to lowercase
+  - capture amount must be > 0 when provided
+- Refund schemas:
+  - statuses: pending, confirmed, declined, canceled
+  - create refund amount must be > 0
+- Webhook schemas:
+  - webhook URL must be HTTPS
+  - dispatch/detail payloads return nested delivery history
+- Ledger schemas:
+  - account types used by business logic: cash, merchant_payable
+  - balance sheet groups by account_type + currency
+
+9) IMPORTANT FEATURES TO REMEMBER
+- API-key auth: raw key in Authorization header, DB stores only hash.
+- Merchant isolation: most reads/writes are scoped to api_key.merchant_id.
+- Idempotency:
+  - payment creation
+  - refund creation
+- Risk:
+  - velocity-rate limiting
+  - high-value auto-flagging
+  - admin review flow
+- Event-driven behavior:
+  - payment/refund state changes create Event rows
+  - events fan out into webhook dispatches
+- Ledger:
+  - double-entry only
+  - captures increase cash and decrease merchant payable
+  - confirmed refunds reverse that movement
+- Observability:
+  - request ID header
+  - structured request logs
+  - Prometheus-style metrics
+
+10) TESTING MENTAL MODEL
+- app/tests/conftest.py:
+  - tests force DATABASE_URL to in-memory SQLite
+  - JSONB is monkeypatched to generic JSON for SQLite
+  - create_database_if_missing() is disabled in tests
+  - 2 API keys are seeded: one normal, one admin
+- What tests prove:
+  - root/health/metrics work
+  - payment idempotency works
+  - payment lifecycle + ledger/refund flow nets balances back to zero
+  - high-value payments auto-flag
+  - velocity limit returns 429
+  - partial capture works
+  - refunds cannot exceed captured amount
+  - risk summary aggregates correctly
+  - ledger entries require uniqueness and pagination works
+  - webhook signatures and retry timing work
+
+11) COMMANDS YOU'LL REUSE
+- Run app locally:
+  - uvicorn app.main:app --reload
+  - ./dev.sh
+- Run Docker stack:
+  - docker compose up --build
+  - docker compose down -v
+- Run migrations:
+  - alembic upgrade head
+  - alembic revision --autogenerate -m "auto update schema"
+- Run tests:
+  - PYTHONPATH=. pytest app/tests -q
+  - make test
+  - make test-cov
+- Open docs:
+  - http://localhost:8000/docs
+
+12) DEPENDENCIES / STACK
+- Runtime: fastapi, uvicorn[standard], sqlalchemy, psycopg2-binary, pydantic-settings, httpx, alembic
+- Dev: pytest, pytest-cov, ruff, black, pre-commit
+
+13) DOCKER / LOCAL INFRA
+- Dockerfile:
+  - python:3.12-slim
+  - installs build-essential
+  - installs requirements.txt
+  - copies repo
+  - exposes 8000
+  - runs uvicorn app.main:app
+- docker-compose.yaml:
+  - app service builds this repo
+  - postgres service uses postgres:16
+  - app waits for healthy Postgres
+  - app command runs alembic upgrade head before uvicorn --reload
+  - code is bind-mounted into /app
+
+14) MISC / NON-RUNTIME FILES
+- notes/commands = manual dev/test curl commands and migration reminders.
+- notes/layout = tiny older summary of route effects.
+- notes.py = scratch SQLAlchemy example, not the real app.
+- code_notes/* = generic FastAPI practice snippets, not part of runtime.
+
+15) IF YOU REBUILD THIS API YOURSELF, COPY THIS ORDER
+- FastAPI app + middleware + health/metrics
+- DB engine/session/base
+- models
+- auth dependency
+- schemas/enums
+- payment service + routes
+- refund service + routes
+- events + webhook queue/delivery
+- ledger service + routes
+- risk summary + timestamp helpers
+- migrations
+- tests
+- Docker + compose
