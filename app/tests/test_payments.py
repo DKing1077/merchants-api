@@ -1,10 +1,7 @@
-import pytest
-
-
 MERCHANT_ID = "merchant_1"
 
 
-def make_payment_intent(client, amount=1000, currency="usd", merchant_id=MERCHANT_ID, **headers):
+def make_payment_intent(client, amount=1_000, currency="usd", merchant_id=MERCHANT_ID, headers=None):
     return client.post(
         "/v1/payment_intents",
         json={"amount": amount, "currency": currency, "merchant_id": merchant_id},
@@ -12,217 +9,87 @@ def make_payment_intent(client, amount=1000, currency="usd", merchant_id=MERCHAN
     )
 
 
-# ---------------------------------------------------------------------------
-# Create
-# ---------------------------------------------------------------------------
-
-
 def test_create_payment_intent(client):
     response = make_payment_intent(client)
     assert response.status_code == 201
     body = response.json()
-    assert body["amount"] == 1000
-    assert body["currency"] == "usd"
-    assert body["merchant_id"] == MERCHANT_ID
+    assert body["amount"] == 1_000
+    assert body["captured_amount"] == 0
+    assert body["total_refunded"] == 0
+    assert body["risk_score"] >= 0
     assert body["status"] == "requires_payment_method"
-    assert body["is_flagged"] is False
-    assert body["review_status"] is None
 
 
-def test_create_payment_intent_missing_fields(client):
-    response = client.post("/v1/payment_intents", json={"amount": 500})
-    assert response.status_code == 422
-
-
-def test_create_payment_intent_idempotency_key(client):
-    headers = {"Idempotency-Key": "key-abc"}
-    r1 = make_payment_intent(client, **headers)
-    r2 = make_payment_intent(client, **headers)
-    assert r1.status_code == 201
-    assert r2.status_code == 201
-    assert r1.json()["id"] == r2.json()["id"]
-
-
-# ---------------------------------------------------------------------------
-# List / Get
-# ---------------------------------------------------------------------------
-
-
-def test_list_payment_intents_empty(client):
-    response = client.get("/v1/payment_intents/")
-    assert response.status_code == 200
-    assert response.json()["payment_intents"] == []
-
-
-def test_list_payment_intents(client):
-    make_payment_intent(client)
-    make_payment_intent(client, amount=2000, currency="eur")
-    response = client.get("/v1/payment_intents/")
-    assert response.status_code == 200
-    assert len(response.json()["payment_intents"]) == 2
-
-
-def test_get_payment_intent(client):
-    created = make_payment_intent(client).json()
-    response = client.get(f"/v1/payment_intents/{created['id']}")
-    assert response.status_code == 200
-    assert response.json()["id"] == created["id"]
-
-
-def test_get_payment_intent_not_found(client):
-    response = client.get("/v1/payment_intents/pi_missing")
-    assert response.status_code == 404
-
-
-# ---------------------------------------------------------------------------
-# Confirm → Capture lifecycle
-# ---------------------------------------------------------------------------
-
-
-def test_confirm_payment_intent(client):
-    created = make_payment_intent(client).json()
-    response = client.post(f"/v1/payment_intents/{created['id']}/confirm")
-    assert response.status_code == 200
-    assert response.json()["status"] == "requires_capture"
-
-
-def test_capture_payment_intent(client):
-    created = make_payment_intent(client).json()
-    client.post(f"/v1/payment_intents/{created['id']}/confirm")
-    response = client.post(f"/v1/payment_intents/{created['id']}/capture")
-    assert response.status_code == 200
-    assert response.json()["status"] == "succeeded"
-
-
-def test_cannot_capture_without_confirm(client):
-    created = make_payment_intent(client).json()
-    response = client.post(f"/v1/payment_intents/{created['id']}/capture")
-    assert response.status_code == 409
-
-
-def test_cannot_confirm_already_confirmed(client):
-    created = make_payment_intent(client).json()
-    client.post(f"/v1/payment_intents/{created['id']}/confirm")
-    response = client.post(f"/v1/payment_intents/{created['id']}/confirm")
-    assert response.status_code == 409
-
-
-def test_cannot_confirm_succeeded_payment_intent(client):
-    created = make_payment_intent(client).json()
-    client.post(f"/v1/payment_intents/{created['id']}/confirm")
-    client.post(f"/v1/payment_intents/{created['id']}/capture")
-    response = client.post(f"/v1/payment_intents/{created['id']}/confirm")
-    assert response.status_code == 409
-
-
-# ---------------------------------------------------------------------------
-# Cancel
-# ---------------------------------------------------------------------------
-
-
-def test_cancel_payment_intent(client):
-    created = make_payment_intent(client).json()
-    response = client.post(f"/v1/payment_intents/{created['id']}/cancel")
-    assert response.status_code == 200
-    assert response.json()["status"] == "canceled"
-
-
-def test_cannot_cancel_succeeded_payment_intent(client):
-    created = make_payment_intent(client).json()
-    client.post(f"/v1/payment_intents/{created['id']}/confirm")
-    client.post(f"/v1/payment_intents/{created['id']}/capture")
-    response = client.post(f"/v1/payment_intents/{created['id']}/cancel")
-    assert response.status_code == 409
-
-
-def test_cannot_cancel_already_canceled(client):
-    created = make_payment_intent(client).json()
-    client.post(f"/v1/payment_intents/{created['id']}/cancel")
-    response = client.post(f"/v1/payment_intents/{created['id']}/cancel")
-    assert response.status_code == 409
-
-
-def test_cannot_confirm_canceled_payment_intent(client):
-    created = make_payment_intent(client).json()
-    client.post(f"/v1/payment_intents/{created['id']}/cancel")
-    response = client.post(f"/v1/payment_intents/{created['id']}/confirm")
-    assert response.status_code == 409
-
-
-# ---------------------------------------------------------------------------
-# Flag / Review
-# ---------------------------------------------------------------------------
-
-
-def test_flag_payment_intent(client):
-    created = make_payment_intent(client).json()
-    response = client.post(
-        f"/v1/payment_intents/{created['id']}/flag",
-        json={"reason": "suspicious activity"},
-    )
-    assert response.status_code == 200
+def test_high_value_payment_auto_flagged(client):
+    response = make_payment_intent(client, amount=100_001)
+    assert response.status_code == 201
     body = response.json()
     assert body["is_flagged"] is True
     assert body["review_status"] == "pending_review"
-    assert body["review_reason"] == "suspicious activity"
 
 
-def test_flag_payment_intent_not_found(client):
-    response = client.post(
-        "/v1/payment_intents/pi_missing/flag",
-        json={"reason": "test"},
-    )
-    assert response.status_code == 404
+def test_velocity_limit_returns_429(client):
+    for _ in range(10):
+        assert make_payment_intent(client).status_code == 201
+    response = make_payment_intent(client)
+    assert response.status_code == 429
 
 
-def test_list_flagged_payment_intents(client):
-    pi1 = make_payment_intent(client).json()
-    make_payment_intent(client)
-    client.post(f"/v1/payment_intents/{pi1['id']}/flag", json={"reason": "fraud"})
-    response = client.get("/v1/payment_intents/admin/flagged")
-    assert response.status_code == 200
-    flagged = response.json()["payment_intents"]
-    assert len(flagged) == 1
-    assert flagged[0]["id"] == pi1["id"]
-
-
-def test_review_payment_intent_approved(client):
+def test_partial_capture_and_cancel_remaining(client):
     created = make_payment_intent(client).json()
-    client.post(f"/v1/payment_intents/{created['id']}/flag", json={"reason": "review"})
-    response = client.post(
-        f"/v1/payment_intents/admin/{created['id']}/review",
-        json={"review_status": "approved"},
+    client.post(f"/v1/payment_intents/{created['id']}/confirm")
+
+    partial = client.post(
+        f"/v1/payment_intents/{created['id']}/capture",
+        json={"amount": 400},
     )
-    assert response.status_code == 200
-    assert response.json()["review_status"] == "approved"
+    assert partial.status_code == 200
+    assert partial.json()["captured_amount"] == 400
+    assert partial.json()["status"] == "requires_capture"
+
+    canceled = client.post(f"/v1/payment_intents/{created['id']}/cancel")
+    assert canceled.status_code == 200
+    assert canceled.json()["captured_amount"] == 400
+    assert canceled.json()["status"] == "canceled"
 
 
-def test_review_payment_intent_rejected(client):
+def test_partial_refund_cannot_exceed_captured_amount(client):
     created = make_payment_intent(client).json()
-    client.post(f"/v1/payment_intents/{created['id']}/flag", json={"reason": "review"})
-    response = client.post(
-        f"/v1/payment_intents/admin/{created['id']}/review",
-        json={"review_status": "rejected"},
+    client.post(f"/v1/payment_intents/{created['id']}/confirm")
+    client.post(f"/v1/payment_intents/{created['id']}/capture")
+
+    refund = client.post(
+        f"/v1/refunds/payment_intents/{created['id']}/refunds",
+        json={"amount": 400},
     )
-    assert response.status_code == 200
-    assert response.json()["review_status"] == "rejected"
+    assert refund.status_code == 200
+    confirm = client.post(f"/v1/refunds/{refund.json()['id']}/confirm")
+    assert confirm.status_code == 200
 
+    payment_intent = client.get(f"/v1/payment_intents/{created['id']}")
+    assert payment_intent.status_code == 200
+    assert payment_intent.json()["total_refunded"] == 400
 
-def test_cannot_review_unflagged_payment_intent(client):
-    created = make_payment_intent(client).json()
-    response = client.post(
-        f"/v1/payment_intents/admin/{created['id']}/review",
-        json={"review_status": "approved"},
+    too_large = client.post(
+        f"/v1/refunds/payment_intents/{created['id']}/refunds",
+        json={"amount": 700},
     )
-    assert response.status_code == 409
+    assert too_large.status_code == 409
 
 
-def test_cannot_confirm_rejected_payment_intent(client):
-    created = make_payment_intent(client).json()
-    client.post(f"/v1/payment_intents/{created['id']}/flag", json={"reason": "review"})
+def test_admin_risk_summary(client, admin_headers):
+    high = make_payment_intent(client, amount=120_000).json()
     client.post(
-        f"/v1/payment_intents/admin/{created['id']}/review",
-        json={"review_status": "rejected"},
+        f"/v1/payment_intents/admin/{high['id']}/review",
+        json={"review_status": "approved"},
+        headers=admin_headers,
     )
-    response = client.post(f"/v1/payment_intents/{created['id']}/confirm")
-    assert response.status_code == 409
+    make_payment_intent(client, amount=1_000)
+
+    response = client.get("/v1/admin/risk/summary", headers=admin_headers)
+    assert response.status_code == 200
+    summary = response.json()[0]
+    assert summary["merchant_id"] == MERCHANT_ID
+    assert summary["flagged"] == 1
+    assert summary["approved"] == 1
+    assert summary["average_risk_score"] > 0

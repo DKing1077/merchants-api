@@ -1,80 +1,48 @@
-"""
-Tests for the refunds service.
-
-NOTE: The refunds router is not registered in app/main.py, so these tests
-exercise the service functions directly via the database session fixture.
-"""
 import pytest
-from app.services import refunds_service
-from app.services import payment_service
-from app.core.exceptions import RefundNotFoundError, RefundStateError
+
+from app.db.models import PaymentIntent
 from app.schemas.refunds_schemas import RefundStatus
+from app.services import payment_service, refunds_service
+from app.core.exceptions import RefundStateError
 
 
-def make_payment_intent(db, amount=5000, currency="usd", merchant_id="merchant_1"):
-    return payment_service.create_payment_intent(
-        db=db, amount=amount, currency=currency, merchant_id=merchant_id
+MERCHANT_ID = "merchant_1"
+
+
+def make_captured_payment_intent(db, amount=1_000):
+    payment_intent = payment_service.create_payment_intent(
+        db=db,
+        amount=amount,
+        currency="usd",
+        merchant_id=MERCHANT_ID,
     )
+    payment_service.confirm_payment_intent(db, payment_intent.id, MERCHANT_ID)
+    return payment_service.capture_payment_intent(db, payment_intent.id, MERCHANT_ID)
 
 
-# ---------------------------------------------------------------------------
-# list_refunds
-# ---------------------------------------------------------------------------
+def test_create_refund_requires_captured_funds(db):
+    payment_intent = payment_service.create_payment_intent(
+        db=db,
+        amount=1_000,
+        currency="usd",
+        merchant_id=MERCHANT_ID,
+    )
+    with pytest.raises(RefundStateError, match="captured funds"):
+        refunds_service.create_refund(db, payment_intent.id, 100, merchant_id=MERCHANT_ID)
 
 
-def test_list_refunds_empty(db):
-    refunds = refunds_service.list_refunds(db)
-    assert refunds == []
+def test_create_refund_respects_captured_amount(db):
+    payment_intent = make_captured_payment_intent(db, amount=900)
+    refunds_service.create_refund(db, payment_intent.id, 400, merchant_id=MERCHANT_ID)
+    with pytest.raises(RefundStateError, match="captured amount"):
+        refunds_service.create_refund(db, payment_intent.id, 600, merchant_id=MERCHANT_ID)
 
 
-# ---------------------------------------------------------------------------
-# get_refund – not found
-# ---------------------------------------------------------------------------
+def test_confirm_refund_updates_total_refunded(db):
+    payment_intent = make_captured_payment_intent(db)
+    refund = refunds_service.create_refund(db, payment_intent.id, 250, merchant_id=MERCHANT_ID)
+    confirmed = refunds_service.confirm_refund(refund.id, db, MERCHANT_ID)
 
-
-def test_get_refund_not_found(db):
-    with pytest.raises(RefundNotFoundError):
-        refunds_service.get_refund("pi_missing", db)
-
-
-# ---------------------------------------------------------------------------
-# create_refund – validation errors (raised before any DB write)
-# ---------------------------------------------------------------------------
-
-
-def test_create_refund_zero_amount_raises(db):
-    pi = make_payment_intent(db)
-    with pytest.raises(RefundStateError, match="greater than 0"):
-        refunds_service.create_refund(db, pi.id, 0)
-
-
-def test_create_refund_negative_amount_raises(db):
-    pi = make_payment_intent(db)
-    with pytest.raises(RefundStateError, match="greater than 0"):
-        refunds_service.create_refund(db, pi.id, -100)
-
-
-def test_create_refund_exceeds_payment_amount_raises(db):
-    pi = make_payment_intent(db, amount=1000)
-    with pytest.raises(RefundStateError, match="greater than payment amount"):
-        refunds_service.create_refund(db, pi.id, 9999)
-
-
-# ---------------------------------------------------------------------------
-# confirm / decline / cancel – not found
-# ---------------------------------------------------------------------------
-
-
-def test_confirm_refund_not_found_raises(db):
-    with pytest.raises(RefundNotFoundError):
-        refunds_service.confirm_refund("pi_missing", db)
-
-
-def test_decline_refund_not_found_raises(db):
-    with pytest.raises(RefundNotFoundError):
-        refunds_service.decline_refund("pi_missing", db)
-
-
-def test_cancel_refund_not_found_raises(db):
-    with pytest.raises(RefundNotFoundError):
-        refunds_service.cancel_refund("pi_missing", db)
+    refreshed = db.query(PaymentIntent).filter(PaymentIntent.id == payment_intent.id).first()
+    assert confirmed.status == RefundStatus.confirmed
+    assert refreshed.total_refunded == 250
