@@ -3,16 +3,26 @@ from __future__ import annotations
 import uuid
 
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.core.exceptions import PaymentIntentNotFoundError, RefundNotFoundError, RefundStateError
 from app.db.models import LedgerAccount, PaymentIntent, Refunds
+from app.schemas.ledger_schemas import AccountType
+from app.schemas.payments_schemas import ReviewStatus
 from app.schemas.refunds_schemas import RefundStatus
 from app.services.dispatch import create_dispatches_for_event
 from app.services.events import create_event
 from app.services.ledger_service import create_ledger_entry
 
 
-def list_refunds(db, merchant_id, limit=20, starting_after=None, payment_intent_id=None, status=None):
+def list_refunds(
+    db: Session,
+    merchant_id: str,
+    limit: int = 20,
+    starting_after: str | None = None,
+    payment_intent_id: str | None = None,
+    status: str | None = None,
+) -> dict:
     query = (
         db.query(Refunds)
         .filter(Refunds.merchant_id == merchant_id)
@@ -37,7 +47,9 @@ def list_refunds(db, merchant_id, limit=20, starting_after=None, payment_intent_
     return {"data": rows[:limit], "has_more": len(rows) > limit}
 
 
-def list_flagged_refunds(db, merchant_id, limit=20, starting_after=None):
+def list_flagged_refunds(
+    db: Session, merchant_id: str, limit: int = 20, starting_after: str | None = None
+) -> dict:
     query = (
         db.query(Refunds)
         .filter(Refunds.merchant_id == merchant_id, Refunds.is_flagged.is_(True))
@@ -62,7 +74,13 @@ def list_flagged_refunds(db, merchant_id, limit=20, starting_after=None):
     return {"data": rows[:limit], "has_more": len(rows) > limit}
 
 
-def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None, merchant_id=None):
+def create_refund(
+    db: Session,
+    payment_intent_id: str,
+    refund_amount: int,
+    idempotency_key: str | None = None,
+    merchant_id: str | None = None,
+) -> Refunds:
     if idempotency_key:
         existing = (
             db.query(Refunds)
@@ -134,7 +152,7 @@ def create_refund(db, payment_intent_id, refund_amount, idempotency_key=None, me
     return refund
 
 
-def get_refund(refund_id, db, merchant_id):
+def get_refund(refund_id: str, db: Session, merchant_id: str) -> Refunds:
     refund = (
         db.query(Refunds)
         .filter(Refunds.id == refund_id, Refunds.merchant_id == merchant_id)
@@ -145,17 +163,17 @@ def get_refund(refund_id, db, merchant_id):
     return refund
 
 
-def flag_refund(db, refund_id, reason, merchant_id):
+def flag_refund(db: Session, refund_id: str, reason: str, merchant_id: str) -> Refunds:
     refund = get_refund(refund_id, db, merchant_id)
     refund.is_flagged = True
-    refund.review_status = "pending_review"
+    refund.review_status = ReviewStatus.pending_review.value
     refund.review_reason = reason
     db.commit()
     db.refresh(refund)
     return refund
 
 
-def review_refund(db, refund_id, review_status, merchant_id):
+def review_refund(db: Session, refund_id: str, review_status: str, merchant_id: str) -> Refunds:
     refund = get_refund(refund_id, db, merchant_id)
     if not refund.is_flagged:
         raise RefundStateError(f"Refund {refund_id} is not flagged for review")
@@ -165,11 +183,11 @@ def review_refund(db, refund_id, review_status, merchant_id):
     return refund
 
 
-def confirm_refund(refund_id, db, merchant_id):
+def confirm_refund(refund_id: str, db: Session, merchant_id: str) -> Refunds:
     refund = get_refund(refund_id, db, merchant_id)
     if refund.status != RefundStatus.pending:
         raise RefundStateError(f"Refund {refund_id} is not in a pending state")
-    if refund.review_status == "rejected":
+    if refund.review_status == ReviewStatus.rejected.value:
         raise RefundStateError(f"Cannot confirm rejected refund {refund_id}")
 
     payment_intent = (
@@ -203,7 +221,7 @@ def confirm_refund(refund_id, db, merchant_id):
         db.query(LedgerAccount)
         .filter(
             LedgerAccount.merchant_id == payment_intent.merchant_id,
-            LedgerAccount.account_type == "cash",
+            LedgerAccount.account_type == AccountType.cash.value,
             LedgerAccount.currency == payment_intent.currency,
         )
         .first()
@@ -212,7 +230,7 @@ def confirm_refund(refund_id, db, merchant_id):
         db.query(LedgerAccount)
         .filter(
             LedgerAccount.merchant_id == payment_intent.merchant_id,
-            LedgerAccount.account_type == "merchant_payable",
+            LedgerAccount.account_type == AccountType.merchant_payable.value,
             LedgerAccount.currency == payment_intent.currency,
         )
         .first()
@@ -246,7 +264,7 @@ def confirm_refund(refund_id, db, merchant_id):
     return refund
 
 
-def decline_refund(refund_id, db, merchant_id):
+def decline_refund(refund_id: str, db: Session, merchant_id: str) -> Refunds:
     refund = get_refund(refund_id, db, merchant_id)
     if refund.status != RefundStatus.pending:
         raise RefundStateError(f"Refund {refund_id} is not in a pending state")
@@ -271,7 +289,7 @@ def decline_refund(refund_id, db, merchant_id):
     return refund
 
 
-def cancel_refund(refund_id, db, merchant_id):
+def cancel_refund(refund_id: str, db: Session, merchant_id: str) -> Refunds:
     refund = get_refund(refund_id, db, merchant_id)
     if refund.status != RefundStatus.pending:
         raise RefundStateError(f"Refund {refund_id} is not in a pending state")
