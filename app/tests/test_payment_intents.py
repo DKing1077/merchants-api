@@ -12,8 +12,9 @@ def test_idempotency_same_key_creates_one_record(client):
 
     listed = client.get("/v1/payment_intents/")
     assert listed.status_code == 200
-    assert listed.json()["data"][0]["id"] == r1.json()["id"]
-    assert len(listed.json()["data"]) == 1
+    data = listed.json()["data"]
+    assert len(data) == 1
+    assert data[0]["id"] == r1.json()["id"]
 
 
 def test_full_payment_lifecycle_ledger_nets_to_zero(client):
@@ -37,14 +38,18 @@ def test_full_payment_lifecycle_ledger_nets_to_zero(client):
 
 
 def test_concurrent_payment_intents_have_unique_ids(client):
-    # Create multiple payment intents concurrently; all IDs must be unique.
-    # Uses threading to mirror real concurrent load, with a lock to guard
-    # the in-memory SQLite test DB (which serialises writes).
+    # Each thread gets its own TestClient to avoid sharing the same HTTP session
+    # concurrently, which is not thread-safe.  The shared in-memory DB is
+    # protected by StaticPool, so writes are serialised.
+    from app.main import app as _app
+    from fastapi.testclient import TestClient
+
     ids = []
     lock = threading.Lock()
 
     def create():
-        r = client.post(
+        c = TestClient(_app, headers={"Authorization": "test-key"})
+        r = c.post(
             "/v1/payment_intents",
             json={"amount": 100, "currency": "usd", "merchant_id": "merchant_1"},
         )
