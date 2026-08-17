@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-
 from sqlalchemy.orm import Session
-
 from app.core.config import settings
 from app.core.exceptions import InvalidPaymentIntentStateError, PaymentIntentNotFoundError
 from app.db.models import LedgerAccount, PaymentIntent
@@ -21,8 +19,7 @@ def create_payment_intent(
     amount: int,
     currency: str,
     merchant_id: str,
-    idempotency_key: str | None = None,
-) -> PaymentIntent:
+    idempotency_key: str | None = None) -> PaymentIntent:
     if idempotency_key:
         existing = (
             db.query(PaymentIntent)
@@ -96,8 +93,7 @@ def list_payment_intents(
     status: str | None = None,
     created_after: datetime | None = None,
     created_before: datetime | None = None,
-    currency: str | None = None,
-) -> dict:
+    currency: str | None = None) -> dict:
     query = (
         db.query(PaymentIntent)
         .filter(PaymentIntent.merchant_id == merchant_id)
@@ -137,8 +133,7 @@ def list_payment_intent_transactions(
     payment_intent_id: str,
     merchant_id: str,
     limit: int = 20,
-    starting_after: str | None = None,
-) -> dict:
+    starting_after: str | None = None) -> dict:
     payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
     transactions = [
         {
@@ -221,8 +216,7 @@ def list_transactions(db: Session, merchant_id: str, limit: int = 20, starting_a
 
 
 def list_flagged_payment_intents(
-    db: Session, merchant_id: str, limit: int = 20, starting_after: str | None = None
-) -> dict:
+    db: Session, merchant_id: str, limit: int = 20, starting_after: str | None = None) -> dict:
     query = (
         db.query(PaymentIntent)
         .filter(PaymentIntent.merchant_id == merchant_id, PaymentIntent.is_flagged.is_(True))
@@ -258,8 +252,7 @@ def flag_payment_intent(db: Session, payment_intent_id: str, reason: str, mercha
 
 
 def review_payment_intent(
-    db: Session, payment_intent_id: str, review_status: str, merchant_id: str
-) -> PaymentIntent:
+    db: Session, payment_intent_id: str, review_status: str, merchant_id: str) -> PaymentIntent:
     payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
     if not payment_intent.is_flagged:
         raise InvalidPaymentIntentStateError(
@@ -299,8 +292,7 @@ def confirm_payment_intent(db: Session, payment_intent_id: str, merchant_id: str
 
 
 def _get_or_create_ledger_account(
-    db: Session, payment_intent: PaymentIntent, account_type: str, name: str
-) -> LedgerAccount:
+    db: Session, payment_intent: PaymentIntent, account_type: str, name: str) -> LedgerAccount:
     account = (
         db.query(LedgerAccount)
         .filter(
@@ -324,8 +316,7 @@ def _get_or_create_ledger_account(
 
 
 def capture_payment_intent(
-    db: Session, payment_intent_id: str, merchant_id: str, amount: int | None = None
-) -> PaymentIntent:
+    db: Session, payment_intent_id: str, merchant_id: str, amount: int | None = None) -> PaymentIntent:
     payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
     if payment_intent.status == PaymentIntentStatus.canceled.value:
         raise InvalidPaymentIntentStateError(f"Cannot capture canceled payment intent {payment_intent_id}")

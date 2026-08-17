@@ -12,9 +12,8 @@ import app.db.models.models
 from app.api.routes import api_keys, ledger, payments, refunds, risk, timestamps, webhooks
 from app.core.config import settings
 from app.core.observability import MetricsStore, request_id_context, setup_logging
-from app.db.database import Base, create_database_if_missing, engine
+from app.db.database import Base, engine
 
-create_database_if_missing()
 logger = setup_logging()
 app = FastAPI(title=settings.app_name)
 app.state.metrics = MetricsStore()
@@ -92,4 +91,5 @@ app.include_router(risk.router, prefix="/v1", tags=["risk"])
 app.include_router(timestamps.router, prefix="/v1/timestamps", tags=["timestamps"])
 app.include_router(api_keys.router)
 
-Base.metadata.create_all(bind=engine)
+# not needed with albemic setup
+# Base.metadata.create_all(bind=engine)

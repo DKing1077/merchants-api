@@ -1,0 +1,216 @@
+Docker:
+    - localhost - your laptop
+    - :8000 - port 8000 on your laptop
+    - 8000:8000 - Docker maps laptop port 8000 to container port 8000
+    - container port 8000 - the port the app uses inside the container
+    - 0.0.0.0 - the app listens on all addresses inside the container
+    - including the container’s localhost, so Docker can reach it
+
+Dockerfile: says how to build the container image
+docker-compose.yml / YAML file: says how to run the container what services
+    - POSTGRES_DB: merchants - creates the merchants database the first time Postgres starts
+    - postgres_data - saves the database so it can be reused later
+    - alembic upgrade head - applies migrations to create tables and update the schema
+
+main.py:
+    - import sqlalchemy db models
+    - create the fastapi app
+    - creates the tables if there is no albemic setup
+    - attache API endpoints to the FastAPI app
+    - @app.middleware("http") - register the function below as HTTP middleware
+        - the function will run for every incoming HTTP request
+        - It tracks each request from start to finish.
+    - health_check / test route / return metrics route
+
+database.py:
+    - create the database engine with settings.database_url
+    - create SessionLocal bound to the engine
+        - autocommit=False means changes are not saved automatically
+        - autoflush=False means changes are not pushed automatically before queries
+    - create Base with declarative_base()
+        - Base is used for SQLAlchemy models
+    - get_db():
+        - create a database session, db = SessionLocal()
+        - yield the session to the route or service using it
+        - close the session when the request is finished
+
+routes:
+    payments:
+        - create payments:
+            - request, idempotency_key, db, api_key
+            - verify that the merchant id and api key match
+            - create payment intent w/db, amount, currency, merchant id, idem key
+        - flag payment intent:
+            - payment_intent_id, request, db, api_key
+            - require admin api key
+            - flag payment intent with request.reason and merchant id
+            - return updated payment intent
+        - review payment intent
+            - payment_intent_id, request, db, api_key
+            - require admin api key
+            - review payment intent with request.review_status.value and merchant id
+            - return updated payment intent
+        - get payment intent
+            - payment_intent_id, db, api_key
+            - get payment intent with payment_intent_id and merchant id
+            - return payment intent
+        - confirm payment intent
+            - payment_intent_id, db, api_key
+            - confirm payment intent with payment_intent_id and merchant id
+            - return updated payment intent
+        - capture payment intent
+            - payment_intent_id, request, db, api_key
+            - capture payment intent with payment_intent_id, merchant id, and request.amount if provided
+            - return updated payment intent
+        - cancel payment intent
+            - payment_intent_id, db, api_key
+            - cancel payment intent with payment_intent_id and merchant id
+            - return updated payment intent
+        - list payments
+            - limit, starting_after, status, created_after, created_before, currency, db, api_key
+            - verify created_after is less than or equal to created_before
+            - list payment intents with merchant id, pagination filters, status, created range, and currency
+        - list flagged payments
+            - limit, starting_after, db, api_key
+            - require admin api key
+            - list flagged payment intents with merchant id and pagination
+        - list transactions
+            - limit, starting_after, db, api_key
+            - list transactions with merchant id and pagination
+        - list payment intent transaction
+            - payment_intent_id, limit, starting_after, db, api_key
+            - list payment intent transactions with payment_intent_id, merchant id, and pagination
+    refunds:
+        - create refund
+            - payment_intent_id, body, db, api_key, idempotency_key
+            - create refund with db, payment_intent_id, body.amount, idem key, and merchant id
+        - flag refund
+            - refund_id, reason, db, api_key
+            - flag refund with refund id, reason, and merchant id
+            - return updated refund
+        - review refund
+            - refund_id, review_status, db, api_key
+            - require admin api key
+            - review refund with refund id, review_status, and merchant id
+            - return updated refund
+        - get refund
+            - refund_id, db, api_key
+            - get refund with refund id and merchant id
+            - return refund
+        - confirm refund
+            - refund_id, db, api_key
+            - confirm refund with refund id and merchant id
+            - return updated refund
+        - decline refund
+            - refund_id, db, api_key
+            - decline refund with refund id and merchant id
+            - return updated refund
+        - cancel refund
+            - refund_id, db, api_key
+            - cancel refund with refund id and merchant id
+            - return updated refund
+        - list refunds
+            - limit, starting_after, payment_intent_id, status, db, api_key
+            - list refunds with merchant id, pagination, payment_intent_id, and status
+        - list flagged refunds
+            - limit, starting_after, db, api_key
+            - require admin api key
+            - list flagged refunds with merchant id and pagination
+    ledger:
+        - create account
+            - payload, db, api_key
+            - use payload.merchant_id or api_key.merchant_id as merchant id
+            - verify that the merchant id and api key match
+            - create ledger account with name, account_type, currency, and merchant id
+            - return account
+        - create entry
+            - payload, db
+            - create ledger entry with entry_type, reference_id, description, entry_metadata, and postings
+            - commit and refresh entry
+            - return entry
+        - list accounts
+            - db, api_key
+            - list ledger accounts with merchant id
+            - return accounts
+        - get balance
+            - account_id, db
+            - get account balance details with account id
+            - return balance
+        - get account entries
+            - account_id, limit, starting_after, db
+            - list account entries with account id and pagination
+            - return entries
+        - get merchant balance sheet
+            - merchant_id, db, api_key
+            - verify that the merchant id and api key match
+            - get balance sheet with merchant id
+            - return balance sheet
+    webhooks:
+        - create webhook endpoint
+            - payload, db, api_key
+            - verify that the merchant id and api key match
+            - create webhook endpoint with id, merchant id, url, event_types, secret, and is_active
+            - return endpoint
+        - list webhook endpoints
+            - db, api_key
+            - list webhook endpoints with merchant id
+            - return endpoints
+        - update webhook endpoint
+            - endpoint_id, payload, db, api_key
+            - verify that the merchant id and api key match
+            - get endpoint for merchant with endpoint id and merchant id
+            - update merchant id, url, and event_types
+            - return updated endpoint
+        - delete webhook endpoint
+            - endpoint_id, db, api_key
+            - get endpoint for merchant with endpoint id and merchant id
+            - delete endpoint
+            - return deleted message
+        - list endpoint deliveries
+            - endpoint_id, db, api_key
+            - get endpoint for merchant with endpoint id and merchant id
+            - list webhook deliveries joined through webhook dispatch for endpoint id
+            - return deliveries
+        - list webhook dispatches
+            - status, db, api_key
+            - list webhook dispatches joined to webhook endpoints for merchant id
+            - filter by status if provided
+            - return dispatches
+        - get webhook dispatch
+            - dispatch_id, db, api_key
+            - get webhook dispatch joined to webhook endpoint with dispatch id and merchant id
+            - get deliveries for dispatch id
+            - return dispatch detail with deliveries
+        - list webhook deliveries
+            - db, api_key
+            - list webhook deliveries joined through webhook dispatch and webhook endpoint for merchant id
+            - return deliveries
+        - process dispatches
+            - db
+            - process pending dispatches
+            - return processed message
+    api_keys:
+        - create api key
+            - payload, db
+            - generate raw api key
+            - hash raw api key
+            - create api key with id, key_hash, merchant_id, and is_active
+            - return api key response with id, merchant_id, raw api key, is_active, and created_at
+    risk:
+        - risk summary
+            - db, api_key
+            - require admin api key
+            - group payment intents by merchant id
+            - count total, flagged, approved, rejected, and average risk score
+            - return risk summary by merchant
+    timestamps:
+        - created at
+            - payment_intent_id, db
+            - get created_at with payment_intent_id
+            - return created_at
+        - updated at
+            - payment_intent_id, db
+            - get updated_at with payment_intent_id
+            - return updated_at
+
+

@@ -41,11 +41,6 @@ def create_account(payload: LedgerAccountCreate, db: Session = Depends(get_db), 
     return account
 
 
-@router.get("/accounts", response_model=list[LedgerAccountResponse])
-def list_accounts(db: Session = Depends(get_db), api_key=Depends(require_api_key)):
-    return db.query(LedgerAccount).filter(LedgerAccount.merchant_id == api_key.merchant_id).all()
-
-
 @router.post("/entries", response_model=LedgerEntryResponse)
 def create_entry(payload: LedgerEntryCreate, db: Session = Depends(get_db)):
     try:
@@ -64,6 +59,11 @@ def create_entry(payload: LedgerEntryCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.get("/accounts", response_model=list[LedgerAccountResponse])
+def list_accounts(db: Session = Depends(get_db), api_key=Depends(require_api_key)):
+    return db.query(LedgerAccount).filter(LedgerAccount.merchant_id == api_key.merchant_id).all()
 
 
 @router.get("/accounts/{account_id}/balance", response_model=LedgerAccountBalanceResponse)

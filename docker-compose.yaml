@@ -1,35 +1,93 @@
+# Define the containers/services that Docker Compose should run together.
 services:
+  # FastAPI application service
   app:
+    # Build this service using the Dockerfile in the current directory.
     build: .
+
+    # Give the running container a fixed, human-readable name.
     container_name: merchant-api
+
+    # Map port 8000 on your machine to port 8000 inside the container.
+    # This lets you access the FastAPI app at http://localhost:8000
     ports:
       - "8000:8000"
+
+    # Load environment variables from a local .env file.
     env_file:
       - .env
+
+    # Set/override environment variables directly for this container.
     environment:
+      # Database connection string used by the FastAPI app.
+      # Format:
+      # postgresql://username:password@host:port/database
+      #
+      # Here:
+      # - username = postgres
+      # - password = postgres
+      # - host = postgres  (the name of the database service below)
+      # - port = 5432
+      # - database = merchants
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/merchants
+
+    # Don't start the app until the postgres service is healthy.
     depends_on:
       postgres:
         condition: service_healthy
+
+    # Mount the current project directory into /app inside the container.
+    # This is useful in development because code changes on your machine
+    # appear immediately inside the container.
     volumes:
       - .:/app
+
+    # Override the Dockerfile CMD for this service.
+    # First run Alembic migrations, then start Uvicorn in auto-reload mode.
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
+  # PostgreSQL database service
   postgres:
+    # Use the official PostgreSQL 16 image from Docker Hub.
     image: postgres:16
+
+    # Give the database container a fixed name.
     container_name: merchant-postgres
+
+    # Restart the container automatically unless it is manually stopped.
     restart: unless-stopped
+
+    # Environment variables recognized by the official postgres image.
     environment:
+      # Create a database named "merchants"
       POSTGRES_DB: merchants
+
+      # Create a postgres user
       POSTGRES_USER: postgres
+
+      # Set the password for that user
       POSTGRES_PASSWORD: postgres
+
+    # Health check used to determine when PostgreSQL is ready to accept connections.
     healthcheck:
+      # pg_isready checks whether the database is up and responding.
       test: ["CMD-SHELL", "pg_isready -U postgres -d merchants"]
+
+      # Run the health check every 5 seconds.
       interval: 5s
+
+      # Give each health check up to 5 seconds to complete.
       timeout: 5s
+
+      # Mark the container unhealthy after 10 failed attempts.
       retries: 10
+
+    # Persist PostgreSQL data in a named Docker volume.
+    # This keeps your database data even if the container is removed.
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+# Define named volumes used by services above.
 volumes:
+  # Named volume for PostgreSQL persistent storage
   postgres_data:
