@@ -1,0 +1,92 @@
+Merchants API - Backend Project Review for CV
+
+Project Summary
+This project is a FastAPI-based transactional backend for payment intents, refunds, ledger accounting, risk checks, API-key auth, and webhook dispatch/delivery.
+
+Backend Concepts Demonstrated
+1) REST API design
+- Resource-oriented endpoints for payment intents, refunds, ledger, webhooks, risk, and API keys.
+- Route-level validation, status codes, and pagination patterns.
+
+2) Domain modeling and business workflows
+- Payment intent lifecycle: create -> confirm -> capture -> cancel.
+- Refund lifecycle: create -> confirm -> decline -> cancel.
+- Domain rules for state transitions and invalid state handling.
+
+3) Idempotency and consistency
+- Idempotency keys for payment intent and refund creation.
+- Duplicate-protection for ledger entries using reference checks.
+
+4) Multi-tenant authorization boundaries
+- API key authentication with hashed key lookup.
+- Merchant-level data isolation (merchant mismatch checks).
+- Admin-only routes for risk/review workflows.
+
+5) Ledger/accounting fundamentals
+- Double-entry posting model (entries + postings).
+- Balance lookups and grouped balance sheet output.
+- Financial event recording tied to payment/refund actions.
+
+6) Event-driven patterns
+- Event records created on key domain actions.
+- Dispatch records generated from events to subscribed webhook endpoints.
+
+7) Webhook delivery reliability patterns
+- Signed webhook payloads (HMAC SHA-256).
+- Delivery attempts with retries/backoff and final failed/success states.
+- Delivery audit trail and endpoint/dispatch inspection APIs.
+
+8) Risk controls
+- Velocity limit checks and risk scoring.
+- Automatic flagging for high-value transactions.
+- Review/approval/rejection workflow endpoints and risk summary metrics.
+
+9) Observability foundations
+- Request ID middleware and structured request logging.
+- Health endpoint with DB connectivity check.
+- Metrics endpoint with request/error/latency counters and buckets.
+
+10) Database and migrations
+- SQLAlchemy ORM models.
+- Alembic migration history for schema evolution.
+
+11) Testing
+- Pytest coverage for lifecycle flows, idempotency, webhook signatures/retries, ledger balancing, validation, and core routes.
+
+Why this is already strong for a backend CV project
+- It goes beyond CRUD by implementing transactional workflows and constraints.
+- It shows practical backend concerns: idempotency, consistency, auth boundaries, retries, auditing, and observability.
+- It includes automated tests and migration-based schema management.
+
+What to add next to be more competitive for backend engineer roles
+High impact additions:
+1) Fix and harden configuration management
+- Ensure a clear, committed config/settings module with environment-driven defaults and typed validation.
+
+2) Add async processing infrastructure
+- Move webhook processing to a queue/worker model (e.g., Celery/RQ) for production realism.
+
+3) CI/CD and quality gates
+- Add GitHub Actions for lint + tests + coverage reporting on every PR.
+
+4) Security hardening
+- Add rate limiting at API layer, stricter auth scheme (e.g., scoped keys/JWT/OAuth for certain flows), and secrets management guidance.
+
+5) Operational readiness
+- Add centralized error handling, correlation-friendly log format, and runbook-style docs.
+
+6) API documentation quality
+- Expand README with architecture diagram, sequence flows, sample requests/responses, and explicit tradeoffs.
+
+Optional upgrades (nice differentiators)
+- Outbox pattern for event/webhook reliability.
+- Dead-letter queue for failed deliveries.
+- Contract tests for webhook payloads.
+- Load/performance test results and tuning notes.
+
+Suggested CV framing
+"Built a FastAPI transactional payments backend implementing idempotent payment/refund workflows, merchant-scoped API-key auth, double-entry ledger accounting, risk scoring/velocity controls, signed webhooks with retry logic, and observability endpoints (health/metrics), backed by SQLAlchemy, Alembic, and pytest."
+
+Bottom line
+Yes - this is already a good backend project.
+To maximize interview impact, add CI/CD, stronger config/auth hardening, and asynchronous worker-based webhook processing.
