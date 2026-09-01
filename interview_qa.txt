@@ -1,0 +1,855 @@
+================================================================================
+  BACKEND / PYTHON ENGINEERING INTERVIEW Q&A
+  Based on the Merchants API project
+================================================================================
+
+This file covers every major backend concept found in this project.
+Sections mirror the README topic list and the actual source code.
+
+--------------------------------------------------------------------------------
+SECTION 1 — FASTAPI & WEB FRAMEWORKS
+--------------------------------------------------------------------------------
+
+Q: What is FastAPI and why would you choose it over Flask or Django REST Framework?
+A: FastAPI is a modern Python web framework built on top of Starlette (ASGI) and
+   Pydantic. You choose it because:
+   - It uses Python type hints to auto-generate OpenAPI (Swagger) docs.
+   - It is async-native, so it handles concurrent I/O efficiently.
+   - Pydantic gives you automatic request/response validation at zero extra cost.
+   - It is significantly faster than Flask for I/O-bound workloads.
+   Flask is simpler but has no built-in validation. Django REST Framework is more
+   batteries-included but heavier.
+
+Q: What is the difference between WSGI and ASGI?
+A: WSGI (Web Server Gateway Interface) is the traditional Python web standard.
+   It is synchronous — each request blocks a thread until it completes.
+   ASGI (Asynchronous Server Gateway Interface) supports async/await, WebSockets,
+   and long-lived connections. FastAPI runs on ASGI (via Uvicorn), which allows
+   it to handle thousands of concurrent connections with far fewer threads.
+
+Q: What is an APIRouter in FastAPI and why use it?
+A: An APIRouter lets you split route definitions across multiple files/modules.
+   In this project, payments, refunds, ledger, webhooks, risk, api_keys, and
+   timestamps each have their own router. They are registered in main.py with
+   app.include_router(). This keeps the codebase modular and makes each domain
+   independently testable.
+
+Q: What is middleware in a web framework? What does the middleware in this project do?
+A: Middleware wraps every HTTP request/response cycle. In this project, the
+   request_context_middleware:
+   1. Generates a unique request_id (UUID) for every incoming request.
+   2. Stores it in a ContextVar so logging can attach it to every log line.
+   3. Records the start time with time.perf_counter().
+   4. Calls the next handler (call_next).
+   5. After the response, calculates latency, updates the MetricsStore, and
+      adds an X-Request-ID header to the response.
+   This gives full observability per request without touching business logic.
+
+Q: What is dependency injection in FastAPI?
+A: FastAPI's Depends() system lets you declare shared logic (like auth checks or
+   DB session creation) as functions that are automatically called and injected
+   into route handlers. In this project, require_api_key is a dependency — any
+   route that lists it gets the verified ApiKey object automatically. This
+   avoids copy-pasting auth logic everywhere.
+
+Q: What is a health check endpoint and why does every production API have one?
+A: A /health endpoint lets load balancers and orchestration systems (Kubernetes,
+   ECS, etc.) verify that the service is alive and ready to serve traffic.
+   This project's /health endpoint attempts a SELECT 1 against the database and
+   returns 503 if it fails, or 200 with {"status": "ok"} if everything is fine.
+   Without it, dead instances keep receiving traffic.
+
+--------------------------------------------------------------------------------
+SECTION 2 — REST API DESIGN
+--------------------------------------------------------------------------------
+
+Q: What is REST and what are its core constraints?
+A: REST (Representational State Transfer) is an architectural style with these
+   constraints:
+   - Stateless: each request contains all information needed; no session state
+     is stored on the server.
+   - Uniform interface: standard HTTP methods (GET, POST, PUT, PATCH, DELETE)
+     with predictable URL structures.
+   - Client-server separation.
+   - Cacheable responses.
+   - Layered system.
+   In this project every route follows REST: GET /v1/payment_intents lists them,
+   POST creates one, GET /v1/payment_intents/{id} retrieves one, etc.
+
+Q: What are the standard HTTP status codes and when do you use them?
+A: Common ones used in this project:
+   200 OK — successful GET, PATCH
+   201 Created — successful POST (resource created)
+   400 Bad Request — invalid input, validation error
+   401 Unauthorized — missing or invalid API key
+   403 Forbidden — authenticated but not authorized (e.g., non-admin hitting admin routes)
+   404 Not Found — resource doesn't exist
+   409 Conflict — idempotency key collision with different parameters
+   422 Unprocessable Entity — Pydantic validation failure (FastAPI default)
+   500 Internal Server Error — unhandled server exception
+   503 Service Unavailable — health check fails (DB down)
+
+Q: What is API versioning and why does this project use /v1/?
+A: Versioning lets you evolve the API without breaking existing clients.
+   By prefixing routes with /v1/, you can later introduce /v2/ with breaking
+   changes while keeping /v1/ running for older integrations. URI versioning is
+   the most common approach; alternatives include header-based versioning.
+
+Q: What is cursor-based pagination and why is it preferred over offset pagination?
+A: Cursor-based (keyset) pagination uses a pointer into the data (typically the
+   last seen ID or timestamp) rather than an offset number.
+   Why prefer it:
+   - Offset pagination does a full table scan up to the offset. At large offsets
+     this is slow.
+   - Inserting/deleting rows between pages causes records to shift, leading to
+     skipped or duplicated rows with offset pagination.
+   - Cursor pagination always starts from a stable point, is O(log n) with an
+     index, and is safe under concurrent writes.
+   This project implements cursor pagination via starting_after (the last seen
+   resource ID) throughout listing endpoints.
+
+Q: What is the difference between PUT and PATCH?
+A: PUT replaces the entire resource. PATCH applies a partial update. In this
+   project actions like capture, confirm, cancel, flag, review are modeled as
+   sub-resource POST actions rather than PATCH, which is a common pattern for
+   state-machine transitions in payment APIs.
+
+--------------------------------------------------------------------------------
+SECTION 3 — AUTHENTICATION & AUTHORIZATION
+--------------------------------------------------------------------------------
+
+Q: What is the difference between authentication and authorization?
+A: Authentication answers "who are you?" — proving identity.
+   Authorization answers "what are you allowed to do?" — enforcing permissions.
+   In this project: the API key proves identity (authentication). The is_admin
+   flag on the key controls whether the caller can access admin-only routes like
+   creating API keys or flagging payments (authorization).
+
+Q: How does API key authentication work in this project?
+A: When a request arrives, the require_api_key dependency reads the Authorization
+   header. It SHA-256 hashes the raw key and looks up that hash in the api_keys
+   table. If a matching active key is found, the request proceeds; otherwise 401
+   is returned.
+
+Q: Why store a hash of the API key instead of the key itself?
+A: If the database is breached, raw keys would be exposed and attackers could
+   immediately impersonate merchants. Hashing (SHA-256 here, bcrypt/Argon2 for
+   passwords) means the attacker only gets the hash, which can't be reversed.
+   The tradeoff is that you can't show the key again after creation — users
+   must copy it immediately (common in payment platforms like Stripe).
+
+Q: What is the difference between hashing and encryption?
+A: Hashing is one-way: you can't recover the original from the hash. It's used
+   for passwords and API keys where you only need to verify, not retrieve.
+   Encryption is two-way: the original can be recovered with the key. It's used
+   when you need to store data you'll need to read back (e.g., private keys
+   for webhook signing).
+
+Q: What is RBAC (Role-Based Access Control)?
+A: RBAC assigns permissions to roles, and users are assigned roles. This project
+   has two roles: merchant (regular API access) and admin (can manage API keys,
+   flag/review payments). The is_admin boolean on ApiKey is a simple two-role
+   RBAC system.
+
+Q: What is HMAC and why is it used for webhook signatures?
+A: HMAC (Hash-based Message Authentication Code) is a MAC that uses a cryptographic
+   hash function combined with a secret key. This project uses HMAC-SHA256 to
+   sign webhook payloads. The merchant verifies the signature using their shared
+   secret. This proves:
+   1. The payload came from this server (only the server knows the secret).
+   2. The payload was not tampered with in transit.
+   Using hmac.compare_digest() instead of == prevents timing attacks.
+
+Q: What is a timing attack and how does hmac.compare_digest() prevent it?
+A: A timing attack exploits the fact that string comparison (==) returns early
+   as soon as a mismatch is found. An attacker can measure response times to
+   guess the correct value character by character. hmac.compare_digest() always
+   takes the same amount of time regardless of where the mismatch occurs,
+   eliminating this information leak.
+
+--------------------------------------------------------------------------------
+SECTION 4 — DATABASE & ORM (SQLAlchemy + PostgreSQL)
+--------------------------------------------------------------------------------
+
+Q: What is an ORM and why use one?
+A: An ORM (Object-Relational Mapper) maps Python classes to database tables,
+   letting you query and manipulate data using Python objects instead of raw SQL.
+   SQLAlchemy is used here. Benefits: less boilerplate, easier refactoring,
+   database-agnostic code. Tradeoffs: can generate inefficient SQL, adds a layer
+   of abstraction that can be surprising.
+
+Q: What is the difference between SQLAlchemy Core and SQLAlchemy ORM?
+A: SQLAlchemy Core is a lower-level SQL expression language — you write SQL-like
+   constructs in Python. The ORM layer sits on top and maps Python classes to
+   tables. This project uses the ORM (model classes with Column definitions).
+   Core gives more control; ORM is more convenient.
+
+Q: What is a database session and why must it be properly closed?
+A: A session is a unit-of-work object that tracks changes to objects and issues
+   SQL when you call commit() or flush(). Sessions hold a database connection.
+   If you don't close sessions, you exhaust the connection pool. This project
+   uses a get_db() generator with try/finally to ensure the session is always
+   closed, even on exceptions.
+
+Q: What is the difference between flush() and commit() in SQLAlchemy?
+A: flush() sends SQL to the database within the current transaction but does NOT
+   commit it. The data is visible within the same session/transaction. commit()
+   makes the transaction permanent and releases the row locks. flush() is useful
+   when you need the generated primary key (e.g., to use an ID in a subsequent
+   INSERT) before committing the whole transaction.
+
+Q: What is a database transaction and what does ACID stand for?
+A: A transaction is a sequence of operations treated as a single atomic unit.
+   ACID:
+   - Atomicity: all operations succeed or all are rolled back.
+   - Consistency: the database moves from one valid state to another.
+   - Isolation: concurrent transactions don't see each other's uncommitted data.
+   - Durability: committed data survives crashes.
+   In this project, each service function (e.g., create_payment_intent) uses a
+   single transaction — it flushes the payment, event, and dispatches, then
+   commits all at once. If anything fails, nothing is written.
+
+Q: What is a foreign key and what is referential integrity?
+A: A foreign key is a column that references the primary key of another table.
+   Referential integrity means the database enforces that a referenced row must
+   exist — you can't create a Refund pointing to a non-existent PaymentIntent.
+   In this project, Refunds.payment_intent_id has a ForeignKey("payment_intents.id").
+
+Q: What is an index and when should you add one?
+A: An index is a data structure (usually a B-tree) that allows the database to
+   find rows without scanning the full table. You add indexes on:
+   - Primary keys (automatic).
+   - Foreign keys used in joins.
+   - Columns frequently used in WHERE clauses.
+   In this project, merchant_id is indexed on most tables since almost every
+   query filters by merchant. The tradeoff: indexes speed up reads but slow
+   down writes and use disk space.
+
+Q: What is a column_property in SQLAlchemy and how is it used here?
+A: column_property attaches a SQL expression as a mapped attribute on a model.
+   Here, PaymentIntent.total_refunded is a column_property that runs a correlated
+   subquery summing confirmed Refund amounts. When you access payment_intent.total_refunded,
+   SQLAlchemy executes that subquery. It keeps derived data close to the model
+   without denormalizing the database.
+
+Q: What is JSONB in PostgreSQL and when would you use it?
+A: JSONB is a binary JSON column type in PostgreSQL. Unlike TEXT, it is parsed
+   on storage, supports indexing, and allows querying into JSON keys. In this
+   project, Event.payload, WebhookEndpoint.event_types, and LedgerEntry.entry_metadata
+   are JSONB. Use it for semi-structured data where the schema varies, or when
+   you want flexibility without adding columns to the schema.
+
+Q: What is a composite index and when is it needed?
+A: A composite index covers multiple columns (e.g., merchant_id + created_at).
+   It is most useful when queries always filter on both columns together. A
+   composite index on (merchant_id, created_at) would speed up listing a
+   merchant's recent payments without scanning all merchants' data first.
+
+Q: What is N+1 query problem?
+A: The N+1 problem occurs when you load N parent objects (1 query), then for
+   each parent run a separate query to load its children (N queries), totalling
+   N+1 database round trips. In this project, get_balance_sheet() avoids this
+   by using an outerjoin to fetch accounts and their posting sums in a single
+   query rather than looping over accounts and querying postings separately.
+
+--------------------------------------------------------------------------------
+SECTION 5 — DATABASE MIGRATIONS (ALEMBIC)
+--------------------------------------------------------------------------------
+
+Q: What is a database migration and why use Alembic?
+A: A migration is a script that evolves the database schema (adding tables,
+   columns, indexes, constraints) in a controlled, versioned way. Alembic is
+   SQLAlchemy's migration tool. Benefits:
+   - Schema changes are tracked in version control alongside code.
+   - Teams can apply the same migrations in the same order.
+   - Rollback scripts can undo changes.
+   Without migrations, keeping the schema in sync across dev/staging/production
+   is error-prone.
+
+Q: What is the difference between schema migration and data migration?
+A: Schema migration changes the structure (columns, tables, indexes).
+   Data migration transforms existing data (e.g., backfilling a new column).
+   Data migrations are more dangerous as they can be slow and lock tables on
+   large datasets. Zero-downtime strategies include writing to both old/new columns
+   during a transition period.
+
+Q: What is a "zero downtime migration"?
+A: A migration applied without stopping the application. Techniques:
+   - Add columns as nullable first (so existing code still works).
+   - Backfill data in batches.
+   - Deploy code that reads new column.
+   - Make column non-nullable once backfill is done.
+   Never add a non-nullable column without a default in a single step on a live table.
+
+--------------------------------------------------------------------------------
+SECTION 6 — IDEMPOTENCY
+--------------------------------------------------------------------------------
+
+Q: What is idempotency and why is it critical in payment APIs?
+A: An operation is idempotent if performing it multiple times produces the same
+   result as performing it once. In payments, network failures can cause a client
+   to retry a request without knowing if the first attempt succeeded. Without
+   idempotency, this could create duplicate charges.
+
+Q: How does this project implement idempotency?
+A: The client sends a unique idempotency_key (a UUID or similar string) in the
+   request. Before creating a payment or refund, the service checks if a record
+   with that key already exists for the same merchant. If it does, the existing
+   record is returned immediately without creating a duplicate. The idempotency_key
+   column has a UNIQUE constraint to prevent races at the database level.
+
+Q: What is idempotency for GET vs POST requests?
+A: GET, PUT, DELETE are inherently idempotent by the HTTP spec (calling them
+   multiple times has the same effect). POST is not — each call creates a new
+   resource. That's why explicit idempotency keys are needed for POST endpoints
+   in payment systems.
+
+Q: What are the risks of idempotency key collisions?
+A: If two different operations are submitted with the same key, the server will
+   return the first result, silently ignoring the second. Good practice is to
+   return 409 Conflict if the key exists but request parameters differ. This
+   project returns the existing record regardless (simpler, Stripe-style behavior).
+
+--------------------------------------------------------------------------------
+SECTION 7 — RATE LIMITING & VELOCITY CHECKS
+--------------------------------------------------------------------------------
+
+Q: What is rate limiting and why is it important?
+A: Rate limiting restricts how many requests a client can make in a time window.
+   Reasons:
+   - Protect the server from overload / DDoS.
+   - Prevent abuse of expensive operations.
+   - Enforce fair usage across tenants.
+   Common strategies: fixed window, sliding window, token bucket, leaky bucket.
+
+Q: What is merchant velocity limiting and how does this project implement it?
+A: Velocity limiting restricts how many times a merchant can trigger an action
+   in a rolling time window. In this project, enforce_velocity_limit() counts
+   how many PaymentIntents a merchant created in the last N seconds
+   (merchant_velocity_window_seconds). If the count is >= the limit
+   (merchant_velocity_limit), a RiskRateLimitError is raised and the request
+   is rejected with 429 Too Many Requests.
+
+Q: What is the difference between rate limiting and throttling?
+A: Rate limiting hard rejects requests over the limit (returns 429).
+   Throttling slows requests down (adds artificial delay) rather than rejecting.
+   Rate limiting is more common for APIs.
+
+Q: What are the tradeoffs of database-based rate limiting?
+A: Pros: simple to implement, consistent across multiple server instances,
+   durable through restarts.
+   Cons: adds a DB query per request, slower than in-memory approaches.
+   Alternatives: Redis with INCR + EXPIRE for distributed in-memory rate limiting
+   (much faster, commonly used in production).
+
+Q: What is a sliding window vs fixed window rate limit?
+A: Fixed window: counts requests in fixed time buckets (e.g., 0-60s, 60-120s).
+   A burst right at the boundary can exceed the intended rate.
+   Sliding window: counts in a rolling window relative to the current time
+   (e.g., last 60 seconds). This project uses a sliding window via
+   created_at >= now - window_seconds.
+
+--------------------------------------------------------------------------------
+SECTION 8 — RISK SCORING
+--------------------------------------------------------------------------------
+
+Q: What is a risk score and how does this project calculate it?
+A: A risk score numerically represents the likelihood that a transaction is
+   fraudulent or risky. This project's calculate_risk_score() starts at 5 and adds:
+   - +60 if the amount exceeds a high-value threshold.
+   - +25 if the amount is above half the threshold.
+   - +20 if the merchant has no prior transactions (new merchant risk).
+   - +15 if the merchant's velocity is above half the velocity limit.
+   The result is clamped to 100. Scores are stored per PaymentIntent.
+
+Q: What is a rule-based risk system vs an ML-based one?
+A: Rule-based: explicit conditions (if amount > X, score += Y). Fast, auditable,
+   easy to explain. Brittle — bad actors can learn and circumvent the rules.
+   ML-based: trained model detects patterns (anomaly detection, classification).
+   Handles complex relationships, adapts over time, but is a black box and
+   harder to audit. Production systems often combine both.
+
+Q: What does "flagging" a payment mean in this project?
+A: A payment is flagged (is_flagged=True) when it exceeds the high-value
+   threshold. Flagged payments enter a review_status of "pending_review" and
+   cannot be confirmed or captured until an admin approves or rejects them.
+   This is a manual fraud review workflow.
+
+--------------------------------------------------------------------------------
+SECTION 9 — DOUBLE-ENTRY LEDGER / ACCOUNTING
+--------------------------------------------------------------------------------
+
+Q: What is a double-entry ledger and why is it used in fintech?
+A: Double-entry accounting is a system where every financial transaction is
+   recorded as at least two entries (postings): a debit to one account and a
+   credit to another. The fundamental rule: the sum of all postings in a
+   transaction must equal zero. This provides:
+   - A complete, immutable audit trail.
+   - Self-consistency (debits always equal credits).
+   - The ability to reconstruct balances at any point in time.
+
+Q: What are LedgerAccount, LedgerEntry, and LedgerPosting in this project?
+A: - LedgerAccount: a named bucket of money for a merchant (e.g., "Cash", "Merchant Payable").
+   - LedgerEntry: one financial event (e.g., "payment_capture"), grouping 2+ postings.
+   - LedgerPosting: a single debit or credit line on an entry — links an entry to
+     an account with a signed amount. Positive = debit (money in), Negative = credit
+     (money out).
+   When a payment is captured: +amount posted to Cash, -amount posted to Merchant
+   Payable. When a refund is confirmed, it reverses: +amount to Merchant Payable,
+   -amount to Cash.
+
+Q: Why must postings balance to zero?
+A: This is the mathematical invariant of double-entry accounting. It means no
+   money is created or destroyed — it only moves between accounts. This allows
+   you to independently sum any account and be confident the numbers are correct
+   without trusting a single balance field.
+
+Q: How does this project prevent duplicate ledger entries?
+A: create_ledger_entry() checks for an existing LedgerEntry with the same
+   entry_type and reference_id before inserting. If one exists, it raises
+   DuplicateLedgerEntryError. This makes ledger writes idempotent — replaying
+   the same event doesn't create duplicate accounting records.
+
+Q: What is a balance sheet and how is it generated here?
+A: A balance sheet shows all accounts grouped by type (cash, payable, etc.) with
+   their current balances. get_balance_sheet() does a single SQL query that
+   outer-joins LedgerAccount with LedgerPosting, groups by account, sums the
+   amounts, and groups accounts by (account_type, currency). This gives a
+   real-time view of a merchant's financial position.
+
+--------------------------------------------------------------------------------
+SECTION 10 — WEBHOOKS & EVENT-DRIVEN ARCHITECTURE
+--------------------------------------------------------------------------------
+
+Q: What is a webhook?
+A: A webhook is an HTTP callback — your server makes a POST request to a
+   merchant-registered URL when an event occurs (e.g., payment captured).
+   It's "event-driven HTTP": instead of the merchant polling for status,
+   your system pushes updates to them.
+
+Q: What is event-driven architecture?
+A: EDA decouples producers (who emit events) from consumers (who react to them).
+   When an action happens (payment created, refund confirmed), an Event is
+   saved, then dispatched to all interested subscribers. This makes it easy to
+   add new consumers without changing the producer.
+
+Q: Walk me through the webhook delivery flow in this project.
+A: 1. Business logic (e.g., capture_payment_intent) calls create_event() to
+      save an Event row.
+   2. create_dispatches_for_event() queries all active WebhookEndpoints for the
+      merchant that are subscribed to this event type and creates a WebhookDispatch
+      row for each (status=pending).
+   3. process_pending_dispatches() (run separately, e.g., by a cron or worker)
+      queries pending dispatches, POSTs the payload to each endpoint URL with an
+      HMAC signature, and records a WebhookDelivery row with the outcome.
+   4. On failure, next_retry_at is set to now + 5 minutes. Up to MAX_ATTEMPTS=3
+      total tries. After that, the dispatch is marked failed.
+
+Q: What is exponential backoff and why is it better than fixed retry delays?
+A: Exponential backoff doubles the retry delay after each failure (e.g., 5s,
+   10s, 20s, 40s...). This prevents thundering herd — all failing clients
+   retrying at the same fixed interval would overwhelm a recovering service.
+   This project uses a fixed 5-minute delay (simpler), but production systems
+   use exponential backoff with jitter.
+
+Q: What is "at-least-once" delivery and why does it matter?
+A: At-least-once delivery means the system guarantees an event will be delivered
+   at least once, but may deliver it more than once (e.g., if the recipient
+   acknowledged but the response was lost before the sender saw it). This is why
+   webhook consumers must be idempotent — they should handle receiving the same
+   event twice without double-processing it. The dispatch system here retries
+   on failure, so merchants may receive duplicates.
+
+Q: Why sign webhook payloads?
+A: Without signatures, any attacker could send a fake webhook to a merchant's
+   endpoint, triggering fraudulent actions (e.g., fake "payment succeeded"
+   notifications). The HMAC signature, verified using the shared secret, proves
+   the payload originated from your server and was not tampered with.
+
+Q: What is the Event Sourcing pattern?
+A: Event sourcing stores the sequence of events (what happened) rather than
+   current state. The current state is derived by replaying events. This project
+   uses a simplified version — events are stored in the Event table, but current
+   state is also stored in PaymentIntent/Refunds for convenience. Pure event
+   sourcing would derive state entirely from events.
+
+--------------------------------------------------------------------------------
+SECTION 11 — PYDANTIC & DATA VALIDATION
+--------------------------------------------------------------------------------
+
+Q: What is Pydantic and what does it do?
+A: Pydantic is a Python data validation library that uses type annotations to
+   define schemas. When data is passed to a Pydantic model, it validates and
+   coerces it. FastAPI uses Pydantic for request body parsing, query parameter
+   validation, and response serialization.
+
+Q: What is the difference between a Pydantic model and a SQLAlchemy model?
+A: SQLAlchemy models map to database tables and manage persistence.
+   Pydantic models (schemas) define the shape of data for API input/output.
+   Separating them is a best practice — your API contract (Pydantic) is
+   decoupled from your database structure (SQLAlchemy). This project uses
+   schemas/ for Pydantic and db/models/ for SQLAlchemy.
+
+Q: What is schema validation and why is it important?
+A: Validation ensures incoming data meets your expectations before it reaches
+   business logic. Without it, bad data propagates through the system, causing
+   obscure errors at the database level or worse, silently corrupting data.
+   FastAPI + Pydantic validate automatically and return 422 with a detailed
+   error body if validation fails.
+
+Q: What is an Enum in Python and how is it used here?
+A: An Enum defines a fixed set of named values. In this project, PaymentIntentStatus,
+   RefundStatus, ReviewStatus, and AccountType are Enums. Using Enums instead of
+   raw strings prevents typos, enables IDE autocompletion, and makes invalid states
+   impossible to represent.
+
+--------------------------------------------------------------------------------
+SECTION 12 — OBSERVABILITY (LOGGING, METRICS, TRACING)
+--------------------------------------------------------------------------------
+
+Q: What is observability and what are its three pillars?
+A: Observability is the ability to understand what a system is doing from the
+   outside. The three pillars:
+   - Logs: timestamped records of events (what happened).
+   - Metrics: numerical measurements over time (how many, how fast).
+   - Traces: end-to-end records of a single request across services (where time was spent).
+   This project implements logs (structured JSON logging) and metrics (Prometheus-
+   compatible /metrics endpoint). Distributed tracing is not implemented.
+
+Q: What is structured logging and why is it better than plain text logs?
+A: Structured logging emits logs as key-value pairs (JSON) rather than free-form
+   text. This makes logs machine-parseable by log aggregators (Splunk, Datadog,
+   CloudWatch). In this project, every log line includes request_id, method,
+   path, status_code, and latency_ms as structured fields.
+
+Q: What is a ContextVar and why is it used for request_id?
+A: A ContextVar stores values scoped to an execution context (think: per-request).
+   In async code, multiple requests run concurrently in the same process. A global
+   variable would be shared and overwritten. A ContextVar gives each request its
+   own isolated copy of the request_id, so log lines from concurrent requests
+   don't mix up IDs.
+
+Q: What is Prometheus and what metrics does this project expose?
+A: Prometheus is an open-source monitoring system that scrapes metrics from a
+   /metrics endpoint in a text format. This project exposes:
+   - merchants_api_requests_total: total requests per route (counter).
+   - merchants_api_errors_total: error responses per route (counter).
+   - merchants_api_request_latency_seconds_sum/count/bucket: latency histogram.
+   These allow building dashboards (e.g., Grafana) and alerting on error rates
+   or latency spikes.
+
+Q: What is a histogram metric?
+A: A histogram counts observations into configurable buckets (e.g., ≤0.05s,
+   ≤0.1s, ≤0.5s, ≤1.0s, +Inf). It allows computing percentiles (p50, p95, p99
+   latency). This is more useful than an average, which can hide tail latency.
+   The MetricsStore in this project implements a histogram for request latency.
+
+Q: What is the difference between a counter and a gauge metric?
+A: Counter: monotonically increasing value (resets to 0 on restart). Used for
+   total counts (requests, errors). You compute rates by differencing samples.
+   Gauge: current value that goes up and down (active connections, queue size,
+   memory usage). This project uses counters.
+
+--------------------------------------------------------------------------------
+SECTION 13 — ASYNC / CONCURRENCY
+--------------------------------------------------------------------------------
+
+Q: What is the difference between concurrency and parallelism?
+A: Concurrency: multiple tasks are in progress at the same time, but not
+   necessarily executing simultaneously (interleaved).
+   Parallelism: multiple tasks execute simultaneously on multiple CPU cores.
+   Python's asyncio provides concurrency via cooperative multitasking on a single
+   thread. True parallelism in Python requires multiprocessing (due to the GIL).
+
+Q: What is the GIL (Global Interpreter Lock) in Python?
+A: The GIL is a mutex in CPython that allows only one thread to execute Python
+   bytecode at a time. This means Python threads cannot achieve true parallelism
+   for CPU-bound work. However, the GIL is released during I/O operations (DB
+   queries, HTTP calls), so threads (and async) still provide concurrency for
+   I/O-bound workloads like this API.
+
+Q: What is async/await in Python and when should you use it?
+A: async/await is Python's syntax for cooperative concurrency. An async function
+   can yield control at await points, letting the event loop run other coroutines.
+   Use it for I/O-bound work (network, database). For CPU-bound work, use
+   multiprocessing or a thread pool instead. FastAPI natively supports async
+   route handlers.
+
+Q: What is the event loop?
+A: The event loop is the core of asyncio. It continuously picks up ready coroutines,
+   runs them until they hit an await, suspends them, runs something else, and
+   resumes them when their awaited result is ready. Uvicorn runs FastAPI's event
+   loop, handling thousands of concurrent requests with a single thread.
+
+Q: Why is blocking code dangerous in an async application?
+A: If an async route handler calls a blocking function (e.g., a synchronous DB
+   query without await, or time.sleep()), it blocks the event loop thread,
+   preventing ALL other requests from being served until it returns. In this
+   project, SQLAlchemy queries are synchronous. FastAPI handles this by running
+   synchronous route handlers in a thread pool executor automatically.
+
+--------------------------------------------------------------------------------
+SECTION 14 — DOCKER & CONTAINERIZATION
+--------------------------------------------------------------------------------
+
+Q: What is Docker and why use it for backend services?
+A: Docker packages an application and its dependencies into a portable container
+   image. Benefits:
+   - "Works on my machine" problem eliminated — same image runs in dev and prod.
+   - Reproducible builds.
+   - Easy horizontal scaling.
+   - Isolation between services.
+
+Q: What is docker-compose and what does it solve?
+A: docker-compose defines and runs multi-container applications with a YAML file.
+   This project's docker-compose.yaml likely defines the FastAPI app and a
+   PostgreSQL database as separate services with networking between them. Without
+   it, you'd have to manually start each container and configure network links.
+
+Q: What is the difference between an image and a container?
+A: An image is a static snapshot (the blueprint). A container is a running instance
+   of an image. You can run many containers from the same image, each with its
+   own isolated file system and process space.
+
+Q: What is Uvicorn and what role does it play?
+A: Uvicorn is an ASGI server — it receives HTTP connections and calls FastAPI's
+   ASGI application. Think of it as the equivalent of Gunicorn for WSGI apps,
+   but async-capable. In production you typically run multiple Uvicorn workers
+   behind a reverse proxy (Nginx) or use Gunicorn with Uvicorn worker class.
+
+--------------------------------------------------------------------------------
+SECTION 15 — TESTING
+--------------------------------------------------------------------------------
+
+Q: What is the difference between unit tests, integration tests, and end-to-end tests?
+A: Unit tests: test a single function or class in isolation, mocking dependencies.
+   Fast, pinpoint failures.
+   Integration tests: test multiple components together (e.g., service + real DB).
+   Slower but catch integration bugs.
+   End-to-end tests: test the full stack from HTTP request to database response.
+   This project uses pytest with what appear to be integration tests
+   (using a real test database session via conftest.py fixtures).
+
+Q: What is a pytest fixture?
+A: A fixture is a reusable setup/teardown function in pytest, declared with
+   @pytest.fixture. It can provide test data, DB sessions, or mock objects. Tests
+   declare fixtures as parameters and pytest injects them. This project uses
+   fixtures in conftest.py (e.g., a test DB session).
+
+Q: What is test isolation and why is it important?
+A: Each test should be independent — setup its own data, not rely on other tests'
+   state, and clean up after itself. Without isolation, test order matters and
+   failures cascade. Common techniques: database transactions rolled back per test,
+   or a fresh in-memory SQLite DB per test session.
+
+Q: What is mocking and when would you use it?
+A: Mocking replaces a real dependency with a fake that returns controlled values.
+   Use it to: isolate units from their dependencies (DB, HTTP calls), test error
+   paths that are hard to trigger with real dependencies, speed up tests.
+   The unittest.mock or pytest-mock libraries are common in Python.
+
+Q: What is PYTHONPATH and why is it set when running tests?
+A: PYTHONPATH tells Python where to look for modules. Running
+   PYTHONPATH=. pytest app/tests -q makes the repo root available so imports
+   like "from app.services..." resolve correctly without installing the package.
+
+--------------------------------------------------------------------------------
+SECTION 16 — SECURITY CONCEPTS
+--------------------------------------------------------------------------------
+
+Q: What is SQL injection and how does SQLAlchemy protect against it?
+A: SQL injection is when user input is embedded directly into a SQL query string,
+   allowing attackers to execute arbitrary SQL. SQLAlchemy's ORM and Core use
+   parameterized queries — user values are passed as parameters, never string-
+   interpolated into SQL. This prevents injection entirely.
+
+Q: What is least privilege and how does it apply here?
+A: Least privilege means each entity should have the minimum permissions needed.
+   In this project: merchant API keys can only access their own data (all queries
+   filter by merchant_id). Admin keys are required only for privileged operations
+   (flagging, reviewing, creating API keys). A merchant can never read another
+   merchant's data.
+
+Q: What is tenant isolation in a multi-tenant API?
+A: Multi-tenancy means multiple customers (tenants / merchants) share the same
+   system. Isolation means each tenant can only see their own data. This project
+   achieves row-level isolation by always including merchant_id in every query
+   filter. A compromised merchant key cannot access other merchants' payments.
+
+Q: What is input validation and why does it matter for security?
+A: Validating all input at the API boundary prevents malformed data from reaching
+   business logic or the database. Pydantic enforces types, ranges, and formats.
+   For example, currency is validated as a 3-character string, amounts as integers.
+   This prevents type confusion attacks and ensures data integrity.
+
+Q: What is the principle of "defense in depth"?
+A: Multiple layers of security controls so that if one layer fails, others still
+   protect the system. This project has: API key authentication, role-based
+   authorization, input validation, hashed key storage, HMAC signatures on webhooks,
+   and merchant_id isolation on all DB queries.
+
+--------------------------------------------------------------------------------
+SECTION 17 — PAYMENT DOMAIN CONCEPTS
+--------------------------------------------------------------------------------
+
+Q: What is a payment intent and why use this model instead of a direct charge?
+A: A payment intent is a two-phase model: first you create the intent (reserve the
+   payment), then you confirm and capture it. This allows:
+   - Separation of authorization and capture.
+   - Partial captures.
+   - Risk review before funds are moved.
+   - Cancellation before capture.
+   Stripe pioneered this model. It gives merchants and the platform control at
+   each step.
+
+Q: What are the payment intent states in this project and what transitions are allowed?
+A: States:
+   - requires_payment_method: initial state after creation.
+   - requires_capture: after confirmation (payment method attached, ready to charge).
+   - succeeded: after full capture.
+   - canceled: terminal, cannot be reversed.
+   Allowed transitions:
+   - requires_payment_method → requires_capture (confirm)
+   - requires_capture → succeeded (full capture)
+   - requires_capture → requires_capture (partial capture)
+   - requires_payment_method or requires_capture → canceled (cancel)
+   You cannot confirm a canceled, succeeded, or rejected intent.
+
+Q: What is partial capture?
+A: Capturing less than the authorized amount. For example, a merchant authorizes
+   $100 but ships items worth $80 — they capture $80 and the remaining $20 is
+   released. The payment intent stays in requires_capture until the full amount
+   is captured or it is canceled.
+
+Q: What is a refund and what prevents over-refunding?
+A: A refund returns captured funds to the customer. This project prevents over-
+   refunding by summing all non-canceled refunds for a payment intent and
+   checking that the new refund doesn't push the total over captured_amount.
+   The column_property total_refunded also tracks this at the model level.
+
+Q: What is the difference between a refund and a chargeback?
+A: A refund is initiated by the merchant voluntarily. A chargeback is initiated
+   by the customer through their bank, bypassing the merchant. Chargebacks result
+   in fees for the merchant and are harder to dispute. Good fraud prevention
+   reduces chargebacks.
+
+--------------------------------------------------------------------------------
+SECTION 18 — PYTHON LANGUAGE CONCEPTS
+--------------------------------------------------------------------------------
+
+Q: What is from __future__ import annotations and why is it used?
+A: It enables PEP 563 "postponed evaluation of annotations" — all type hints are
+   treated as strings and evaluated lazily. This allows forward references
+   (using a class name before it's defined) and avoids circular import issues.
+   It's commonly used in files with complex type relationships.
+
+Q: What is a Python generator function and how is get_db() an example?
+A: A generator function uses yield to produce a sequence of values lazily.
+   get_db() yields the database session and then closes it in the finally block
+   (which runs when the generator is garbage collected or explicitly closed).
+   FastAPI's Depends() knows how to drive this generator — it calls next() to
+   get the session, uses it for the request, then closes the generator
+   (triggering finally) when the request finishes.
+
+Q: What are Python dataclasses vs Pydantic models?
+A: Dataclasses (stdlib) give structured data classes with no validation.
+   Pydantic models validate and coerce data on instantiation. Pydantic also
+   supports JSON serialization, field aliases, and computed fields out of the box.
+   For API I/O where validation matters, Pydantic is superior. For internal data
+   structures, dataclasses are lighter.
+
+Q: What is defaultdict and where is it used in this project?
+A: defaultdict from collections creates a dictionary that returns a default value
+   for missing keys instead of raising KeyError. In MetricsStore, defaultdict(int)
+   means any new route key starts at 0 automatically without explicit initialization.
+   In list_account_entries, defaultdict(list) groups postings by entry_id.
+
+Q: What is the difference between is and == in Python?
+A: == checks value equality (do they have the same content?).
+   is checks identity (are they the same object in memory?). In SQLAlchemy,
+   .is_(True) / .is_(None) are used in queries to generate IS TRUE / IS NULL SQL
+   because Python's == generates = which doesn't work for NULL comparisons in SQL.
+
+Q: What is the walrus operator (:=)?
+A: Introduced in Python 3.8, := (assignment expression) assigns a value and
+   evaluates to it in a single expression. Not used explicitly here but common
+   in modern Python.
+
+Q: What is UUID and why is it used for IDs?
+A: UUID (Universally Unique Identifier) is a 128-bit identifier that is
+   statistically guaranteed to be unique without central coordination. Benefits
+   over auto-increment integers:
+   - IDs can be generated on the client or application layer before DB insert.
+   - IDs don't reveal record counts or creation order to clients.
+   - Safe to use across distributed systems without ID collisions.
+   All primary keys in this project use UUIDs.
+
+Q: What is hashlib.sha256 and when should you prefer bcrypt?
+A: hashlib.sha256 is a fast cryptographic hash. It is appropriate for API keys
+   (which are already high-entropy random strings). For passwords, you must use
+   a slow, adaptive hash like bcrypt, scrypt, or Argon2, because passwords are
+   low-entropy and fast hashing makes brute-force attacks feasible.
+
+--------------------------------------------------------------------------------
+SECTION 19 — SYSTEM DESIGN CONCEPTS
+--------------------------------------------------------------------------------
+
+Q: What is horizontal vs vertical scaling?
+A: Vertical scaling: add more resources to one machine (bigger CPU, more RAM).
+   Horizontal scaling: add more machines. This API is designed for horizontal
+   scaling — stateless (no in-process session state), requests can go to any
+   instance. The only shared state is the PostgreSQL database.
+
+Q: What is the CAP theorem?
+A: In a distributed system you can guarantee at most 2 of 3:
+   - Consistency: every read sees the most recent write.
+   - Availability: every request gets a response.
+   - Partition tolerance: the system keeps working if network partitions occur.
+   PostgreSQL is CP (consistent, partition-tolerant). It may become unavailable
+   during a network partition rather than return stale data.
+
+Q: What is a connection pool and why is it important?
+A: Creating a new DB connection is expensive (TCP handshake, authentication).
+   A connection pool pre-creates connections and reuses them. SQLAlchemy manages
+   a connection pool transparently. Without it, a spike in requests would
+   exhaust DB connections and crash the service.
+
+Q: What is the difference between synchronous and asynchronous DB drivers?
+A: Synchronous drivers (psycopg2, used here) block the calling thread during
+   query execution. Async drivers (asyncpg, aiopg) release the event loop while
+   waiting for the DB. For a fully async FastAPI app with high concurrency,
+   async drivers prevent thread pool exhaustion. This project uses synchronous
+   SQLAlchemy (simpler), which FastAPI handles by running DB operations in a
+   thread pool.
+
+Q: What is a microservice vs a monolith?
+A: A monolith packages all functionality in a single deployable unit (this project).
+   Microservices split functionality across independently deployable services
+   (e.g., a payment service, a ledger service, a webhook service). Monoliths are
+   simpler to develop and debug; microservices scale independently and deploy
+   independently but add network complexity and distributed system challenges.
+
+Q: What is a message queue and when would you use one?
+A: A message queue (Kafka, RabbitMQ, SQS) decouples producers from consumers
+   asynchronously. Instead of directly calling process_pending_dispatches() after
+   a payment event, you'd publish a message to a queue and have a separate worker
+   consume it. Benefits: the API response is faster (no waiting for webhook
+   delivery), failures are retried independently, and the webhook worker can scale
+   separately. This project processes webhooks synchronously / via a polling
+   approach instead.
+
+Q: What is a background worker / job queue?
+A: A separate process that runs tasks asynchronously in the background (Celery,
+   RQ, APScheduler). The webhook delivery in this project (process_pending_dispatches)
+   is designed to be run by a background worker. In production, this would be a
+   separate service or cron job, not the API process itself.
+
+Q: What is idempotent consumer and why does it matter for queues?
+A: A message queue guarantees at-least-once delivery, so your consumer might
+   receive the same message twice. An idempotent consumer processes a message
+   the same way whether it's seen once or many times. This is why webhook
+   receivers should check if they've already processed an event ID before acting.
+
+--------------------------------------------------------------------------------
+END OF FILE
+================================================================================
