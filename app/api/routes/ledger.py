@@ -1,6 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-
 from app.auth.dependencies import require_api_key
 from app.core.exceptions import DuplicateLedgerEntryError
 from app.db.database import get_db
@@ -11,8 +10,7 @@ from app.schemas.ledger_schemas import (
     LedgerAccountCreate,
     LedgerAccountResponse,
     LedgerEntryCreate,
-    LedgerEntryResponse,
-    LedgerEntryWithPostingsResponse,
+    LedgerEntryResponse
 )
 from app.services.ledger_service import (
     create_ledger_entry,
@@ -75,12 +73,8 @@ def get_balance(account_id: str, db: Session = Depends(get_db)):
 
 
 @router.get("/accounts/{account_id}/entries")
-def get_account_entries(
-    account_id: str,
-    limit: int = Query(default=20, ge=1, le=100),
-    starting_after: str | None = Query(default=None),
-    db: Session = Depends(get_db),
-):
+def get_account_entries(account_id: str, limit: int = Query(default=20, ge=1, le=100),
+    starting_after: str | None = Query(default=None), db: Session = Depends(get_db)):
     try:
         return list_account_entries(db=db, account_id=account_id, limit=limit, starting_after=starting_after)
     except ValueError as exc:
@@ -88,11 +82,7 @@ def get_account_entries(
 
 
 @router.get("/merchant/{merchant_id}/balance_sheet", response_model=list[BalanceSheetGroup])
-def get_merchant_balance_sheet(
-    merchant_id: str,
-    db: Session = Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def get_merchant_balance_sheet(merchant_id: str, db: Session = Depends(get_db), api_key=Depends(require_api_key)):
     if merchant_id != api_key.merchant_id:
         raise HTTPException(status_code=403, detail="merchant mismatch")
     return get_balance_sheet(db=db, merchant_id=merchant_id)

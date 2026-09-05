@@ -2,7 +2,6 @@ from __future__ import annotations
 import contextvars
 import logging
 from collections import defaultdict
-
 from app.core.config import settings
 
 request_id_context: contextvars.ContextVar[str] = contextvars.ContextVar(

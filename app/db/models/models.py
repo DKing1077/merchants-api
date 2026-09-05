@@ -1,12 +1,9 @@
 from __future__ import annotations
-
 from datetime import datetime, timezone
 import uuid
-
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text, func, select
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import column_property
-
 from app.db.database import Base
 
 

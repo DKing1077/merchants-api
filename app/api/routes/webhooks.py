@@ -2,7 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 import secrets
 import uuid
-
 from app.auth.dependencies import require_api_key
 from app.db.database import get_db
 from app.db.models import WebhookDelivery, WebhookDispatch, WebhookEndpoint
@@ -30,11 +29,7 @@ def _get_endpoint_for_merchant(db: Session, endpoint_id: str, merchant_id: str) 
 
 
 @router.post("/endpoints", response_model=WebhookEndpointResponse)
-def create_webhook_endpoint(
-    payload: WebhookEndpointCreate,
-    db: Session = Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def create_webhook_endpoint(payload: WebhookEndpointCreate, db: Session = Depends(get_db), api_key=Depends(require_api_key)):
     if payload.merchant_id != api_key.merchant_id:
         raise HTTPException(status_code=403, detail="merchant mismatch")
     endpoint = WebhookEndpoint(
@@ -57,12 +52,8 @@ def list_webhook_endpoints(db: Session = Depends(get_db), api_key=Depends(requir
 
 
 @router.put("/endpoints/{endpoint_id}", response_model=WebhookEndpointResponse)
-def update_webhook_endpoint(
-    endpoint_id: str,
-    payload: WebhookEndpointCreate,
-    db: Session = Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def update_webhook_endpoint(endpoint_id: str, payload: WebhookEndpointCreate,
+    db: Session = Depends(get_db), api_key=Depends(require_api_key)):
     if payload.merchant_id != api_key.merchant_id:
         raise HTTPException(status_code=403, detail="merchant mismatch")
     endpoint = _get_endpoint_for_merchant(db, endpoint_id, api_key.merchant_id)
@@ -75,11 +66,7 @@ def update_webhook_endpoint(
 
 
 @router.delete("/endpoints/{endpoint_id}")
-def delete_webhook_endpoint(
-    endpoint_id: str,
-    db: Session = Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def delete_webhook_endpoint(endpoint_id: str, db: Session = Depends(get_db), api_key=Depends(require_api_key)):
     endpoint = _get_endpoint_for_merchant(db, endpoint_id, api_key.merchant_id)
     db.delete(endpoint)
     db.commit()
@@ -87,11 +74,7 @@ def delete_webhook_endpoint(
 
 
 @router.get("/endpoints/{endpoint_id}/deliveries", response_model=list[WebhookDeliveryResponse])
-def list_endpoint_deliveries(
-    endpoint_id: str,
-    db: Session = Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def list_endpoint_deliveries(endpoint_id: str, db: Session = Depends(get_db), api_key=Depends(require_api_key)):
     _get_endpoint_for_merchant(db, endpoint_id, api_key.merchant_id)
     return (
         db.query(WebhookDelivery)
@@ -103,11 +86,7 @@ def list_endpoint_deliveries(
 
 
 @router.get("/dispatches", response_model=list[WebhookDispatchResponse])
-def list_webhook_dispatches(
-    status: str | None = Query(default=None),
-    db: Session = Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def list_webhook_dispatches(status: str | None = Query(default=None), db: Session = Depends(get_db), api_key=Depends(require_api_key)):
     query = db.query(WebhookDispatch).join(
         WebhookEndpoint,
         WebhookEndpoint.id == WebhookDispatch.webhook_endpoint_id,
@@ -118,11 +97,7 @@ def list_webhook_dispatches(
 
 
 @router.get("/dispatches/{dispatch_id}", response_model=WebhookDispatchDetailResponse)
-def get_webhook_dispatch(
-    dispatch_id: str,
-    db: Session = Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def get_webhook_dispatch(dispatch_id: str, db: Session = Depends(get_db), api_key=Depends(require_api_key)):
     dispatch = (
         db.query(WebhookDispatch)
         .join(WebhookEndpoint, WebhookEndpoint.id == WebhookDispatch.webhook_endpoint_id)

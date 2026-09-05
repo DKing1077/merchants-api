@@ -1,6 +1,5 @@
 from datetime import datetime
 from typing import Any
-
 from pydantic import BaseModel, HttpUrl, field_validator
 
 

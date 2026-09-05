@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import uuid
 from datetime import datetime
 from sqlalchemy.orm import Session
@@ -14,12 +13,8 @@ from app.services.ledger_service import create_ledger_entry
 from app.services.risk_service import calculate_risk_score, enforce_velocity_limit
 
 
-def create_payment_intent(
-    db: Session,
-    amount: int,
-    currency: str,
-    merchant_id: str,
-    idempotency_key: str | None = None) -> PaymentIntent:
+def create_payment_intent(db: Session, amount: int, currency: str,
+    merchant_id: str, idempotency_key: str | None = None) -> PaymentIntent:
     if idempotency_key:
         existing = (
             db.query(PaymentIntent)
@@ -85,15 +80,9 @@ def get_payment_intent(db: Session, payment_intent_id: str, merchant_id: str) ->
     return payment_intent
 
 
-def list_payment_intents(
-    db: Session,
-    merchant_id: str,
-    limit: int = 20,
-    starting_after: str | None = None,
-    status: str | None = None,
-    created_after: datetime | None = None,
-    created_before: datetime | None = None,
-    currency: str | None = None) -> dict:
+def list_payment_intents(db: Session, merchant_id: str, limit: int = 20,
+    starting_after: str | None = None, status: str | None = None, created_after: datetime | None = None,
+    created_before: datetime | None = None, currency: str | None = None) -> dict:
     query = (
         db.query(PaymentIntent)
         .filter(PaymentIntent.merchant_id == merchant_id)
@@ -128,12 +117,8 @@ def list_payment_intents(
     return {"data": rows[:limit], "has_more": len(rows) > limit}
 
 
-def list_payment_intent_transactions(
-    db: Session,
-    payment_intent_id: str,
-    merchant_id: str,
-    limit: int = 20,
-    starting_after: str | None = None) -> dict:
+def list_payment_intent_transactions(db: Session, payment_intent_id: str,
+    merchant_id: str, limit: int = 20, starting_after: str | None = None) -> dict:
     payment_intent = get_payment_intent(db, payment_intent_id, merchant_id)
     transactions = [
         {

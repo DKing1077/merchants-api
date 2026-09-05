@@ -1,10 +1,7 @@
 from __future__ import annotations
-
 import uuid
-
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
 from app.core.exceptions import PaymentIntentNotFoundError, RefundNotFoundError, RefundStateError
 from app.db.models import LedgerAccount, PaymentIntent, Refunds
 from app.schemas.ledger_schemas import AccountType
@@ -15,14 +12,9 @@ from app.services.events import create_event
 from app.services.ledger_service import create_ledger_entry
 
 
-def list_refunds(
-    db: Session,
-    merchant_id: str,
-    limit: int = 20,
-    starting_after: str | None = None,
-    payment_intent_id: str | None = None,
-    status: str | None = None,
-) -> dict:
+def list_refunds(db: Session, merchant_id: str,
+    limit: int = 20, starting_after: str | None = None,
+    payment_intent_id: str | None = None, status: str | None = None) -> dict:
     query = (
         db.query(Refunds)
         .filter(Refunds.merchant_id == merchant_id)
@@ -47,9 +39,7 @@ def list_refunds(
     return {"data": rows[:limit], "has_more": len(rows) > limit}
 
 
-def list_flagged_refunds(
-    db: Session, merchant_id: str, limit: int = 20, starting_after: str | None = None
-) -> dict:
+def list_flagged_refunds(db: Session, merchant_id: str, limit: int = 20, starting_after: str | None = None) -> dict:
     query = (
         db.query(Refunds)
         .filter(Refunds.merchant_id == merchant_id, Refunds.is_flagged.is_(True))
@@ -74,13 +64,8 @@ def list_flagged_refunds(
     return {"data": rows[:limit], "has_more": len(rows) > limit}
 
 
-def create_refund(
-    db: Session,
-    payment_intent_id: str,
-    refund_amount: int,
-    idempotency_key: str | None = None,
-    merchant_id: str | None = None,
-) -> Refunds:
+def create_refund(db: Session, payment_intent_id: str, refund_amount: int,
+    idempotency_key: str | None = None, merchant_id: str | None = None) -> Refunds:
     if idempotency_key:
         existing = (
             db.query(Refunds)

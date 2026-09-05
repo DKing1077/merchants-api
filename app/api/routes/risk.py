@@ -1,6 +1,5 @@
 from sqlalchemy import case, func
 from fastapi import APIRouter, Depends
-
 from app.auth.dependencies import require_admin_api_key
 from app.db.database import get_db
 from app.db.models import PaymentIntent

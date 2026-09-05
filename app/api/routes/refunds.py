@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
-
 from app.auth.dependencies import require_admin_api_key, require_api_key
 from app.core.exceptions import PaymentIntentNotFoundError, RefundNotFoundError, RefundStateError
 from app.db.database import get_db
@@ -20,13 +19,8 @@ router = APIRouter(tags=["refunds"])
 
 
 @router.post("/payment_intents/{payment_intent_id}/refunds")
-def create_refund_route(
-    payment_intent_id: str,
-    body: CreateRefundRequest,
-    db=Depends(get_db),
-    api_key=Depends(require_api_key),
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-):
+def create_refund_route(payment_intent_id: str, body: CreateRefundRequest, db=Depends(get_db),
+    api_key=Depends(require_api_key), idempotency_key: str | None = Header(default=None, alias="Idempotency-Key")):
     try:
         return create_refund(db, payment_intent_id, body.amount, idempotency_key, api_key.merchant_id)
     except PaymentIntentNotFoundError as exc:
@@ -44,12 +38,8 @@ def flag_refund_route(refund_id: str, reason: str, db=Depends(get_db), api_key=D
 
 
 @router.post("/admin/{refund_id}/review")
-def review_refund_route(
-    refund_id: str,
-    review_status: str,
-    db=Depends(get_db),
-    api_key=Depends(require_admin_api_key),
-):
+def review_refund_route(refund_id: str, review_status: str,
+    db=Depends(get_db), api_key=Depends(require_admin_api_key)):
     try:
         return review_refund(db, refund_id, review_status, api_key.merchant_id)
     except RefundNotFoundError as exc:
@@ -97,14 +87,9 @@ def cancel_refund_route(refund_id: str, db=Depends(get_db), api_key=Depends(requ
 
 
 @router.get("")
-def list_refunds_route(
-    limit: int = Query(default=20, ge=1, le=100),
-    starting_after: str | None = Query(default=None),
-    payment_intent_id: str | None = Query(default=None),
-    status: str | None = Query(default=None),
-    db=Depends(get_db),
-    api_key=Depends(require_api_key),
-):
+def list_refunds_route(limit: int = Query(default=20, ge=1, le=100), starting_after: str | None = Query(default=None),
+    payment_intent_id: str | None = Query(default=None), status: str | None = Query(default=None),
+    db=Depends(get_db), api_key=Depends(require_api_key)):
     return list_refunds(
         db=db,
         merchant_id=api_key.merchant_id,
@@ -116,10 +101,6 @@ def list_refunds_route(
 
 
 @router.get("/admin/flagged")
-def list_flagged_refunds_route(
-    limit: int = Query(default=20, ge=1, le=100),
-    starting_after: str | None = Query(default=None),
-    db=Depends(get_db),
-    api_key=Depends(require_admin_api_key),
-):
+def list_flagged_refunds_route(limit: int = Query(default=20, ge=1, le=100), starting_after: str | None = Query(default=None),
+    db=Depends(get_db), api_key=Depends(require_admin_api_key)):
     return list_flagged_refunds(db=db, merchant_id=api_key.merchant_id, limit=limit, starting_after=starting_after)

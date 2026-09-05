@@ -1,23 +1,13 @@
 from __future__ import annotations
-
 from collections import defaultdict
-
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
 from app.core.exceptions import DuplicateLedgerEntryError
 from app.db.models import LedgerAccount, LedgerEntry, LedgerPosting
 
 
-def create_ledger_entry(
-    db: Session,
-    *,
-    entry_type: str,
-    reference_id: str | None = None,
-    description: str | None = None,
-    entry_metadata=None,
-    postings,
-):
+def create_ledger_entry(db: Session, *, entry_type: str, reference_id: str | None = None,
+    description: str | None = None, entry_metadata=None, postings):
     if len(postings) < 2:
         raise ValueError("at least two postings are required")
     if sum(posting["amount"] for posting in postings) != 0:
