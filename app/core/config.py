@@ -2,11 +2,21 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 _DEFAULT_SQLITE_DATABASE_PATH = Path(__file__).resolve().parents[2] / "merchants.db"
+
+
+def _normalize_metrics_latency_buckets(value) -> tuple[float, ...]:
+    buckets = tuple(float(bucket) for bucket in value)
+    if not buckets or any(bucket <= 0 for bucket in buckets):
+        raise ValueError("metrics_latency_buckets must contain positive values")
+    if any(current >= following for current, following in zip(buckets, buckets[1:])):
+        raise ValueError("metrics_latency_buckets must be strictly increasing")
+    return buckets
 
 
 class Settings(BaseSettings):
@@ -16,7 +26,16 @@ class Settings(BaseSettings):
     high_value_payment_threshold: int = 100_000
     merchant_velocity_window_seconds: int = 60
     merchant_velocity_limit: int = 10
-    metrics_latency_buckets: tuple[float, ...] = (0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0)
+    metrics_latency_buckets: Annotated[tuple[float, ...], NoDecode] = (
+        0.01,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
@@ -26,9 +45,11 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             stripped_value = value.strip()
             if stripped_value.startswith("["):
-                return tuple(float(bucket) for bucket in json.loads(stripped_value))
-            return tuple(float(bucket.strip()) for bucket in value.split(",") if bucket.strip())
-        return value
+                return _normalize_metrics_latency_buckets(json.loads(stripped_value))
+            return _normalize_metrics_latency_buckets(
+                bucket.strip() for bucket in value.split(",") if bucket.strip()
+            )
+        return _normalize_metrics_latency_buckets(value)
 
 
 settings = Settings()
