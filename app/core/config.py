@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from pydantic import field_validator
@@ -23,6 +24,9 @@ class Settings(BaseSettings):
     @classmethod
     def parse_metrics_latency_buckets(cls, value):
         if isinstance(value, str):
+            stripped_value = value.strip()
+            if stripped_value.startswith("["):
+                return tuple(float(bucket) for bucket in json.loads(stripped_value))
             return tuple(float(bucket.strip()) for bucket in value.split(",") if bucket.strip())
         return value
 
