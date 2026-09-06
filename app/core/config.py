@@ -11,7 +11,12 @@ _DEFAULT_SQLITE_DATABASE_PATH = Path(__file__).resolve().parents[2] / "merchants
 
 
 def _normalize_metrics_latency_buckets(value) -> tuple[float, ...]:
-    buckets = tuple(float(bucket) for bucket in value)
+    try:
+        buckets = tuple(float(bucket) for bucket in value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "metrics_latency_buckets must be a comma-delimited string or JSON array of positive numbers"
+        ) from exc
     if not buckets or any(bucket <= 0 for bucket in buckets):
         raise ValueError("metrics_latency_buckets must contain positive values")
     if any(current >= following for current, following in zip(buckets, buckets[1:])):
@@ -37,7 +42,7 @@ class Settings(BaseSettings):
         5.0,
     )
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", validate_default=True)
 
     @field_validator("metrics_latency_buckets", mode="before")
     @classmethod
