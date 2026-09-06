@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_DEFAULT_SQLITE_DATABASE_PATH = Path(__file__).resolve().parents[2] / "merchants.db"
 
 
 class Settings(BaseSettings):
     app_name: str = "Merchants API"
     app_version: str = "1.0.0"
-    database_url: str = "sqlite:///./merchants.db"
+    database_url: str = f"sqlite:///{_DEFAULT_SQLITE_DATABASE_PATH}"
     high_value_payment_threshold: int = 100_000
     merchant_velocity_window_seconds: int = 60
     merchant_velocity_limit: int = 10
