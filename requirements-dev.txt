@@ -1,6 +1,0 @@
-pytest
-pytest-cov
-httpx
-ruff
-black
-pre-commit
