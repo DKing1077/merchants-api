@@ -13,10 +13,6 @@ services:
     ports:
       - "8000:8000"
 
-    # Load environment variables from a local .env file.
-    env_file:
-      - .env
-
     # Set/override environment variables directly for this container.
     environment:
       # Database connection string used by the FastAPI app.

@@ -1,12 +1,17 @@
 import hashlib
-from fastapi import Depends, Header, HTTPException
+
+from fastapi import Depends, HTTPException, Security
+from fastapi.security import APIKeyHeader
 from sqlalchemy.orm import Session
+
 from app.db.database import get_db
 from app.db.models import ApiKey
 
+api_key_header = APIKeyHeader(name="Authorization", auto_error=False)
+
 
 def require_api_key(
-    authorization: str | None = Header(default=None, alias="Authorization"),
+    authorization: str | None = Security(api_key_header),
     db: Session = Depends(get_db),
 ):
     if not authorization:
@@ -31,4 +36,3 @@ def require_admin_api_key(
     if not api_key.is_admin:
         raise HTTPException(status_code=403, detail="admin access required")
     return api_key
-

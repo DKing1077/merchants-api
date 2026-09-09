@@ -1,6 +1,5 @@
 .idea/
 /config.py
-.env
 
 # py cache
 __pycache__/
